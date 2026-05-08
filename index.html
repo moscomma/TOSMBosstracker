@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ToS Boss Tracker — Live</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Share+Tech+Mono&family=Crimson+Pro:wght@300;400&display=swap"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#09090f;--bg2:#0d0f1a;--panel:#161828;
+  --border:#252840;--border2:#353860;
+  --text:#d0cae8;--soft:#9890b8;--muted:#555070;--muted2:#2a2945;
+  --gold:#c9a84c;--cream:#f0ead8;
+  --col-wait:#6888cc;--col-soon:#d4a040;--col-p1:#6ecf95;--col-late:#d45868;
+  --mono:'Share Tech Mono',monospace;
+  --disp:'Cinzel',serif;
+}
+html,body{height:100%;min-height:100vh}
+body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;font-size:16px;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 10% 0%,#0b1c10 0%,transparent 60%),
+             radial-gradient(ellipse 45% 55% at 90% 100%,#0c0e20 0%,transparent 60%)}
+body>*{position:relative;z-index:1}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ── HEADER ── */
+header{position:sticky;top:0;z-index:100;background:rgba(9,9,15,.97);border-bottom:1px solid var(--border);backdrop-filter:blur(18px)}
+.hdr{max-width:1200px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:11px}
+.logo-leaf{font-size:30px;animation:sway 5s ease-in-out infinite;filter:drop-shadow(0 0 8px #6ecf9577)}
+@keyframes sway{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}
+.logo-name{font-family:var(--disp);font-size:22px;letter-spacing:4px;color:var(--gold);line-height:1;text-shadow:0 0 30px #c9a84c44}
+.logo-sub{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--muted);margin-top:3px}
+.hdr-r{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.status-pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--col-late);transition:background .3s}
+.status-dot.live{background:var(--col-p1);box-shadow:0 0 6px var(--col-p1);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.count-lbl{font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+/* ── FILTER BAR ── */
+.bar{max-width:1200px;margin:0 auto;padding:7px 24px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-top:1px solid var(--border)}
+.fb{font-family:var(--disp);font-size:12px;letter-spacing:1px;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
+.fb:hover{border-color:var(--border2);color:var(--text)}
+.fb.on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
+.fb[data-f="soon"].on{background:#d4a04018;border-color:var(--col-soon);color:var(--col-soon)}
+.fb[data-f="p1"].on{background:#6ecf9518;border-color:var(--col-p1);color:var(--col-p1)}
+.fb[data-f="late"].on{background:#d4586818;border-color:var(--col-late);color:var(--col-late)}
+.fbc{font-size:10px;opacity:.65}
+.srch{margin-left:auto;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:4px 14px;font-family:var(--mono);font-size:12px;width:180px;outline:none}
+.srch:focus{border-color:var(--gold)}
+.srch::placeholder{color:var(--muted2)}
+
+/* ── GRID ── */
+main{max-width:1200px;margin:0 auto;padding:20px 24px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+#empty{display:none;text-align:center;padding:80px 20px;font-family:var(--mono);font-size:13px;color:var(--muted);letter-spacing:2px}
+#empty.show{display:block}
+
+/* ── CARD ── */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px 13px;position:relative;overflow:hidden;animation:cardIn .26s cubic-bezier(.34,1.3,.64,1);transition:border-color .4s,box-shadow .4s}
+@keyframes cardIn{from{opacity:0;transform:translateY(9px) scale(.96)}to{opacity:1;transform:none}}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:12px 12px 0 0;transition:background .5s}
+.card[data-s="wait"]{border-color:#252840}
+.card[data-s="wait"]::before{background:linear-gradient(90deg,transparent,var(--col-wait),transparent)}
+.card[data-s="soon"]{border-color:#4a3800;box-shadow:0 0 18px #d4a04022}
+.card[data-s="soon"]::before{background:linear-gradient(90deg,transparent,var(--col-soon),transparent)}
+.card[data-s="p1"]{border-color:#183328;background:linear-gradient(145deg,#0b1a10 0%,var(--panel) 55%);box-shadow:0 0 22px #6ecf9522}
+.card[data-s="p1"]::before{background:linear-gradient(90deg,transparent,var(--col-p1),transparent)}
+.card[data-s="late"]{border-color:#3a1218;animation:cardIn .26s ease,glowLate 1.8s ease-in-out infinite}
+.card[data-s="late"]::before{background:linear-gradient(90deg,transparent,var(--col-late),transparent)}
+@keyframes glowLate{0%,100%{box-shadow:0 0 14px #d4586833}50%{box-shadow:0 0 32px #d4586866}}
+.card[data-s="miss"]{border-color:#333355;opacity:.65;background:repeating-linear-gradient(-45deg,#0e0f18 0px,#0e0f18 8px,#111320 8px,#111320 16px) !important}
+.card[data-s="miss"]::before{background:linear-gradient(90deg,transparent,#444466,transparent) !important}
+
+/* card header row */
+.ch{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.chips{display:flex;gap:6px;flex:1;align-items:center}
+.chip{font-family:var(--disp);font-size:13px;letter-spacing:1px;padding:3px 12px;border-radius:20px;background:var(--bg2);border:1px solid var(--border);display:inline-flex;align-items:center;gap:4px}
+.cl{color:var(--muted);font-size:10px}
+.cv{color:var(--cream);font-weight:600}
+.card[data-s="p1"]  .chip{border-color:#183328}
+.card[data-s="late"] .chip{border-color:#3a1218}
+.card[data-s="soon"] .chip{border-color:#4a3800}
+.state-badge{font-family:var(--mono);font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:10px;border:1px solid currentColor;margin-left:auto;flex-shrink:0}
+.badge-wait{color:var(--col-wait);border-color:#2a3566}
+.badge-soon{color:var(--col-soon);border-color:#4a3800}
+.badge-p1{color:var(--col-p1);border-color:#183328}
+.badge-late{color:var(--col-late);border-color:#3a1218}
+.badge-miss{color:#666688;border-color:#333355}
+
+/* countdown */
+.cd-wrap{text-align:center;padding:10px 0 8px}
+.cd-num{font-family:var(--mono);font-weight:700;font-size:52px;letter-spacing:-1px;line-height:1;transition:color .4s}
+.cd-lbl{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;margin-top:4px}
+.cd-bar-wrap{background:var(--muted2);border-radius:3px;height:3px;overflow:hidden;margin-top:8px}
+.cd-bar{height:100%;border-radius:3px;transition:width .9s linear,background .4s}
+
+/* note + footer */
+.note-row{font-family:var(--mono);font-size:10px;color:var(--soft);background:var(--bg2);border-radius:6px;padding:5px 10px;margin-top:8px;letter-spacing:.5px}
+.ro-label{text-align:center;font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--muted2);padding:4px 0 0}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hdr">
+    <div class="logo">
+      <span class="logo-leaf">🌿</span>
+      <div>
+        <div class="logo-name">BOSS TRACKER</div>
+        <div class="logo-sub">LIVE VIEWER</div>
+      </div>
+    </div>
+    <div class="hdr-r">
+      <span class="count-lbl" id="countLbl">— tracked</span>
+      <div class="status-pill">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusLbl">CONNECTING</span>
+      </div>
+    </div>
+  </div>
+  <div class="bar">
+    <button class="fb on" data-f="ALL">All <span class="fbc" id="fc-ALL"></span></button>
+    <button class="fb" data-f="wait">Waiting <span class="fbc" id="fc-wait"></span></button>
+    <button class="fb" data-f="soon">Soon <span class="fbc" id="fc-soon"></span></button>
+    <button class="fb" data-f="p1">P1 Active <span class="fbc" id="fc-p1"></span></button>
+    <button class="fb" data-f="late">Late <span class="fbc" id="fc-late"></span></button>
+    <input class="srch" id="srch" placeholder="Search level / channel…"/>
+  </div>
+</header>
+
+<main>
+  <div id="empty">No bosses being tracked right now.</div>
+  <div id="grid"></div>
+</main>
+
+<!--
+  CONFIGURATION — fill in your Supabase project URL and anon key.
+  Find these in: Supabase dashboard → Project Settings → API
+  The anon key is public-safe; RLS policies control what it can access.
+-->
+<script>
+const SUPABASE_URL      = 'https://uuixnhlvikgmvbajeewv.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1aXhuaGx2aWtnbXZiYWplZXd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyNTY4MDcsImV4cCI6MjA5MzgzMjgwN30.I3wwbpJuRpFoClUzdYTaUyeHvKjas27I7y48rcTRy9Q';
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<script>
+// ── State ─────────────────────────────────────────────────────
+var entries = {};
+var filt    = 'ALL';
+var qry     = '';
+var tickIv  = null;
+
+// ── DB row (snake_case) → entry (camelCase) ───────────────────
+function rowToEntry(row) {
+  return {
+    id:         row.id,
+    level:      row.level       || '',
+    channel:    row.channel     || '',
+    killTime:   row.kill_time   || 0,
+    durationMs: row.duration_ms || 0,
+    snapshots:  row.snapshots   || [],
+    note:       row.note        || '',
+    createdAt:  row.created_at  || 0,
+    missing:    !!row.missing,
+  };
+}
+
+// ── State computation (mirrors getState in the Electron app) ──
+function getState(e, now) {
+  if (!e.killTime || !e.durationMs) return { s: e.missing ? 'miss' : 'wait', rem: null, pct: 0 };
+  var elapsed = now - e.killTime;
+  var rem     = e.durationMs - elapsed;
+  var pct     = Math.min(1, elapsed / e.durationMs);
+  var s;
+  if      (e.missing)         s = 'miss';
+  else if (rem > 5 * 60000)   s = 'wait';
+  else if (rem > 0)           s = 'soon';
+  else if (rem > -20 * 60000) s = 'p1';
+  else                        s = 'late';
+  return { s: s, rem: rem, pct: pct };
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function pad(n) { return String(Math.floor(Math.abs(n))).padStart(2, '0'); }
+function fmtCd(ms) {
+  if (ms < 0) ms = 0;
+  var s = Math.floor(ms / 1000) % 60, m = Math.floor(ms / 60000) % 60, h = Math.floor(ms / 3600000);
+  return h > 0 ? pad(h)+':'+pad(m)+':'+pad(s) : pad(m)+':'+pad(s);
+}
+function fmtOver(ms) {
+  ms = Math.abs(ms);
+  var s = Math.floor(ms / 1000) % 60, m = Math.floor(ms / 60000) % 60, h = Math.floor(ms / 3600000);
+  return h > 0 ? '+'+pad(h)+':'+pad(m)+':'+pad(s) : '+'+pad(m)+':'+pad(s);
+}
+function hhmm(ts) { var d = new Date(ts); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+var S_LABEL = { wait:'WAITING', soon:'SOON', p1:'P1 ACTIVE', late:'LATE', miss:'MISSING' };
+var S_BADGE = { wait:'badge-wait', soon:'badge-soon', p1:'badge-p1', late:'badge-late', miss:'badge-miss' };
+
+// ── Card HTML ─────────────────────────────────────────────────
+function cardHTML(e) {
+  var st = getState(e, Date.now());
+  return [
+    '<div class="ch">',
+      '<div class="chips">',
+        '<div class="chip"><span class="cl">LV</span><span class="cv">'+esc(e.level||'?')+'</span></div>',
+        '<div class="chip"><span class="cl">CH</span><span class="cv">'+esc(e.channel||'?')+'</span></div>',
+      '</div>',
+      '<span class="state-badge '+S_BADGE[st.s]+'">'+S_LABEL[st.s]+'</span>',
+    '</div>',
+    '<div class="cd-wrap">',
+      '<div class="cd-num js-cdnum" style="color:var(--muted)">--:--</div>',
+      '<div class="cd-lbl js-cdlbl"></div>',
+      '<div class="cd-bar-wrap"><div class="cd-bar js-cdbar" style="width:0%"></div></div>',
+    '</div>',
+    e.note ? '<div class="note-row">'+esc(e.note)+'</div>' : '',
+    '<div class="ro-label">read-only · live</div>',
+  ].join('');
+}
+
+// ── Tick one card ─────────────────────────────────────────────
+function tick1(card, e, now) {
+  var st = getState(e, now);
+  card.dataset.s = st.s;
+
+  var badge = card.querySelector('.state-badge');
+  if (badge) { badge.className = 'state-badge ' + S_BADGE[st.s]; badge.textContent = S_LABEL[st.s]; }
+
+  var cdNum = card.querySelector('.js-cdnum');
+  var cdLbl = card.querySelector('.js-cdlbl');
+  var cdBar = card.querySelector('.js-cdbar');
+
+  if (!e.killTime) {
+    if (cdNum) { cdNum.textContent = '--:--'; cdNum.style.color = 'var(--muted)'; cdNum.style.fontSize = ''; }
+    if (cdLbl) cdLbl.textContent = e.missing ? 'marked missing' : 'awaiting kill data';
+    if (cdBar) { cdBar.style.width = '0%'; cdBar.style.background = 'var(--muted2)'; }
+    return;
+  }
+  if (!e.durationMs) {
+    if (cdNum) { cdNum.textContent = 'P1 Active'; cdNum.style.color = 'var(--col-p1)'; cdNum.style.fontSize = '34px'; }
+    if (cdLbl) cdLbl.textContent = '';
+    if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = 'var(--col-p1)'; }
+    return;
+  }
+
+  if (cdNum) cdNum.style.fontSize = '';
+  if (st.rem > 0) {
+    var col = st.s === 'soon' ? 'var(--col-soon)' : 'var(--col-wait)';
+    if (cdNum) { cdNum.textContent = fmtCd(st.rem); cdNum.style.color = col; }
+    if (cdLbl) cdLbl.textContent = 'P1 at ' + hhmm(e.killTime + e.durationMs);
+    if (cdBar) { cdBar.style.width = Math.min(100, st.pct * 100).toFixed(1) + '%'; cdBar.style.background = col; }
+  } else {
+    var col2 = st.s === 'late' ? 'var(--col-late)' : 'var(--col-p1)';
+    if (cdNum) { cdNum.textContent = fmtOver(st.rem); cdNum.style.color = col2; }
+    if (cdLbl) cdLbl.textContent = st.s === 'late' ? 'Overtime!' : 'P1 Active';
+    if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = col2; }
+  }
+}
+
+// ── Sort (soonest first) ──────────────────────────────────────
+function sortScore(e, now) {
+  var st = getState(e, now);
+  if (st.rem !== null && st.rem > 0) return st.rem;
+  if (e.killTime && e.durationMs) return (e.killTime + e.durationMs) - now + 1000000;
+  return 9999999999;
+}
+
+// ── Render ────────────────────────────────────────────────────
+function renderAll() {
+  var grid  = document.getElementById('grid');
+  var empty = document.getElementById('empty');
+  var now   = Date.now();
+  var list  = Object.keys(entries).map(function(k){ return entries[k]; });
+  list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
+
+  var counts = { ALL:0, wait:0, soon:0, p1:0, late:0, miss:0 };
+  list.forEach(function(e){ counts.ALL++; var s=getState(e,now).s; counts[s]=(counts[s]||0)+1; });
+
+  ['ALL','wait','soon','p1','late'].forEach(function(k){
+    var el = document.getElementById('fc-'+k);
+    if (el) el.textContent = counts[k] > 0 ? '('+counts[k]+')' : '';
+  });
+  document.getElementById('countLbl').textContent = counts.ALL + ' tracked';
+
+  var inc = {};
+  var filtered = list.filter(function(e){
+    var s = getState(e,now).s;
+    var fok = filt === 'ALL' || filt === s;
+    var sq  = ((e.level||'')+(e.channel||'')).toLowerCase();
+    var ok  = fok && (!qry || sq.indexOf(qry) !== -1);
+    if (ok) inc[e.id] = true;
+    return ok;
+  });
+
+  if (!filtered.length) { grid.innerHTML = ''; empty.classList.add('show'); return; }
+  empty.classList.remove('show');
+
+  Array.from(grid.querySelectorAll('.card')).forEach(function(c){
+    if (!inc[c.dataset.id]) c.remove();
+  });
+  filtered.forEach(function(e){
+    if (!grid.querySelector('[data-id="'+e.id+'"]')) {
+      var card = document.createElement('div');
+      card.className = 'card'; card.dataset.id = e.id; card.dataset.s = 'wait';
+      card.innerHTML = cardHTML(e);
+      grid.appendChild(card);
+    }
+  });
+  filtered.forEach(function(e, idx){
+    var card = grid.querySelector('[data-id="'+e.id+'"]');
+    if (!card) return;
+    var cur = grid.children[idx];
+    if (cur !== card) grid.insertBefore(card, cur || null);
+  });
+}
+
+// ── Tick loop ─────────────────────────────────────────────────
+function startTick() {
+  clearInterval(tickIv);
+  tickIv = setInterval(function(){
+    var now = Date.now();
+    document.querySelectorAll('.card').forEach(function(card){
+      var e = entries[card.dataset.id]; if (e) tick1(card, e, now);
+    });
+  }, 1000);
+}
+
+// ── Filter UI ─────────────────────────────────────────────────
+document.querySelectorAll('.fb').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    filt = btn.dataset.f;
+    document.querySelectorAll('.fb').forEach(function(b){ b.classList.remove('on'); });
+    btn.classList.add('on');
+    renderAll();
+  });
+});
+document.getElementById('srch').addEventListener('input', function(){
+  qry = this.value.trim().toLowerCase(); renderAll();
+});
+
+// ── Supabase connect ──────────────────────────────────────────
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+var statusDot = document.getElementById('statusDot');
+var statusLbl = document.getElementById('statusLbl');
+
+function setLive(on) {
+  if (on) { statusDot.classList.add('live'); statusLbl.textContent = 'LIVE'; }
+  else    { statusDot.classList.remove('live'); statusLbl.textContent = 'OFFLINE'; }
+}
+
+async function loadAll() {
+  var { data, error } = await sb.from('boss_entries').select('*');
+  if (error) { console.error('[viewer] load error', error); return; }
+  entries = {};
+  (data || []).forEach(function(row){ var e = rowToEntry(row); entries[e.id] = e; });
+  renderAll();
+}
+
+sb.channel('boss-live')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'boss_entries' }, function(payload){
+    if (payload.eventType === 'DELETE') {
+      delete entries[payload.old.id];
+    } else {
+      var e = rowToEntry(payload.new); entries[e.id] = e;
+    }
+    renderAll();
+  })
+  .subscribe(function(status){
+    setLive(status === 'SUBSCRIBED');
+  });
+
+// Boot
+loadAll();
+startTick();
+</script>
+
+</body>
+</html>
