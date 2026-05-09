@@ -215,11 +215,17 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .chip-edit:focus{border-color:var(--col-p1)}
 .cd-num.js-edittime{cursor:pointer;border-radius:6px;padding:0 4px;transition:background .15s}
 .cd-num.js-edittime:hover{background:var(--bg2)}
-.card-acts{display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+.card-acts{display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);align-items:stretch}
 .card-act{flex:1;font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:.5px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--soft);cursor:pointer;transition:all .15s}
 .card-act:hover{border-color:var(--col-p1);color:var(--col-p1)}
-.card-act.respawn{color:var(--gold);border-color:#3a2c0e}
+.card-act.respawn{flex:0 0 auto;padding:6px 12px;color:var(--gold);border-color:#3a2c0e}
 .card-act.respawn:hover{background:#c9a84c18;border-color:var(--gold);box-shadow:0 0 10px #c9a84c44}
+.card-snap-form{flex:1;display:flex;margin:0}
+.card-snap-in{flex:1;width:100%;font-family:var(--mono);font-size:11px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);outline:none;transition:border-color .15s}
+.card-snap-in::placeholder{color:var(--muted2)}
+.card-snap-in:focus{border-color:var(--col-p1)}
+.card-snap-in.err{border-color:var(--col-late);animation:shake .2s}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
 </style>
 </head>
 <body>
@@ -540,8 +546,10 @@ function cardHTML(e) {
     '</div>',
     e.note ? '<div class="note-row">'+esc(e.note)+'</div>' : '',
     '<div class="card-acts">',
-      '<button class="card-act js-snap" data-id="'+esc(e.id)+'" title="Add a phase snapshot">+P Snapshot</button>',
-      '<button class="card-act respawn js-respawn" data-id="'+esc(e.id)+'" title="Mark boss as respawned">🔥 Respawn</button>',
+      '<form class="card-snap-form js-snapform" data-id="'+esc(e.id)+'" autocomplete="off">',
+        '<input class="card-snap-in" type="text" placeholder="phase 3.5 / on  ·  or time 80, 1:30" />',
+      '</form>',
+      '<button class="card-act respawn js-respawn" data-id="'+esc(e.id)+'" title="Mark boss as respawned">🔥</button>',
     '</div>',
   ].join('');
 }
@@ -866,11 +874,8 @@ function sortByCreated(a, b) {
   return (a.createdAt || 0) - (b.createdAt || 0);
 }
 function applySort(list, now) {
-  // P1-4 filter always sorts by phase descending (4 → 3 → 2 → 1)
-  if (filt === 'p1')             list.sort(sortByPhaseDesc(now));
-  else if (sortBy === 'channel') list.sort(sortByChannel);
-  else if (sortBy === 'soonest') list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
-  else                           list.sort(sortByCreated);
+  if (sortBy === 'channel') list.sort(sortByChannel);
+  else                      list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
 }
 
 // ── Render ────────────────────────────────────────────────────
@@ -1079,8 +1084,8 @@ document.querySelectorAll('.fb').forEach(function(btn){
 document.getElementById('srch').addEventListener('input', function(){
   qry = this.value.trim().toLowerCase(); renderAll();
 });
-var SORT_LABELS = { soonest: '⇅ Soonest', channel: '⇅ Channel', stable: '📌 Stable' };
-var SORT_ORDER  = ['soonest', 'channel', 'stable'];
+var SORT_LABELS = { soonest: '⇅ Soonest', channel: '⇅ Channel' };
+var SORT_ORDER  = ['soonest', 'channel'];
 document.getElementById('sortBtn').addEventListener('click', function(){
   var i = SORT_ORDER.indexOf(sortBy);
   sortBy = SORT_ORDER[(i + 1) % SORT_ORDER.length];
@@ -1282,14 +1287,44 @@ document.getElementById('grid').addEventListener('click', async function(ev){
   var t = ev.target;
   var btn = t.closest('[data-id]');
   if (!btn) return;
+  if (t.closest('.card-snap-in') || t.closest('.js-snapform')) return;  // don't hijack input clicks
   ev.stopPropagation();
   var id = btn.dataset.id;
   if      (t.closest('.js-del'))      await handleCardAction('del',     id);
   else if (t.closest('.js-respawn'))  await handleCardAction('respawn', id);
-  else if (t.closest('.js-snap'))     await handleCardAction('snap',    id);
   else if (t.closest('.js-edittime')) await handleCardAction('time',    id);
   else if (t.closest('.js-editch'))   await handleCardAction('ch',      id);
   else if (t.closest('.js-editlv'))   await handleCardAction('lv',      id);
+});
+
+// Inline snapshot/time input on each card. Submitting "3.5" / "on" adds a
+// snapshot; submitting "80" / "1:30" / "1.20" starts a fresh countdown
+// (which clears the snapshots — useful right after a boss dies).
+document.getElementById('grid').addEventListener('submit', async function(ev){
+  var f = ev.target.closest('.js-snapform');
+  if (!f) return;
+  ev.preventDefault();
+  var inp = f.querySelector('.card-snap-in');
+  var raw = (inp.value || '').trim();
+  if (!raw) return;
+  var id = f.dataset.id;
+  var e  = entries[id];
+  if (!e) return;
+  var lv = parseInt(e.level, 10), ch = parseInt(e.channel, 10);
+  var p  = parseValueOnly(raw, lv, ch);
+  if (p.error) {
+    inp.classList.add('err');
+    setTimeout(function(){ inp.classList.remove('err'); }, 400);
+    return;
+  }
+  try {
+    var nick = ensureNick();
+    if (p.kind === 'snap') await commitSnapshot(lv, ch, p.phase, nick);
+    else                   await commitKill(lv, ch, p.durationMs, nick);
+    inp.value = '';
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 });
 
 // Decide whether clicking the big "cd-num" should edit the time or add a snapshot,
@@ -1314,23 +1349,16 @@ async function handleCardAction(act, id) {
   try {
     if (act === 'respawn') {
       await commitSnapshot(lv, ch, 5.0, nick);
-    } else if (act === 'snap') {
-      var s = prompt('Phase (1.0 – 5.0, or "on" for respawn):', '');
+    } else if (act === 'snap' || act === 'edittime') {
+      var s = prompt('Type phase (3.5, on)  OR  time (80, 1:30, 1.20):', '');
       if (s === null || s === '') return;
       var p = parseValueOnly(s, lv, ch);
-      if (p.error || p.kind !== 'snap') return alert('Invalid phase: ' + (p.error || s));
-      await commitSnapshot(lv, ch, p.phase, nick);
-    } else if (act === 'edittime') {
-      var t = prompt('New time-to-P1  (1.20 = 1h 20m, 50 = 50 min, 1:30 = 1h 30m):', '');
-      if (t === null || t === '') return;
-      var pt = parseValueOnly(t, lv, ch);
-      if (pt.error || pt.kind !== 'kill') return alert('Invalid time: ' + (pt.error || t));
-      var now = Date.now();
-      var { error } = await sb.from('boss_entries').update({
-        kill_time: now, duration_ms: pt.durationMs,
-        note: 'edit time via web @' + nick, synced_at: now,
-      }).eq('id', id);
-      if (error) alert('Error: ' + error.message);
+      if (p.error) return alert(p.error);
+      if (p.kind === 'snap') {
+        await commitSnapshot(lv, ch, p.phase, nick);
+      } else {
+        await commitKill(lv, ch, p.durationMs, nick);
+      }
     } else if (act === 'ch') {
       var c = prompt('New channel  (currently CH' + e.channel + '):', '');
       if (c === null || c === '') return;
