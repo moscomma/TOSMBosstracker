@@ -309,8 +309,10 @@ function estimatePhase(e, now) {
     var last = snaps[snaps.length - 1];
     return Math.min(5.0, last.phase + (now - last.time) * DEFAULT_PHASE_SPEED);
   }
-  // No snapshots — estimate from P1 start
+  // No snapshots — estimate from P1 start only if we have timing data
+  if (!e.killTime || !e.durationMs) return null;
   var p1Start = e.killTime + e.durationMs;
+  if (now < p1Start) return null;
   return Math.min(5.0, 1.0 + (now - p1Start) * DEFAULT_PHASE_SPEED);
 }
 
@@ -323,24 +325,9 @@ function tick1(card, e, now) {
   var badge = card.querySelector('.state-badge');
   if (badge) { badge.className = 'state-badge ' + S_BADGE[st.s]; badge.textContent = S_LABEL[st.s]; }
 
-  var cdNum = card.querySelector('.js-cdnum');
-  var cdLbl = card.querySelector('.js-cdlbl');
-  var cdBar = card.querySelector('.js-cdbar');
-
-  if (!e.killTime) {
-    if (cdNum) { cdNum.textContent = '--:--'; cdNum.style.color = 'var(--muted)'; cdNum.style.fontSize = ''; }
-    if (cdLbl) cdLbl.textContent = e.missing ? 'marked missing' : 'awaiting kill data';
-    if (cdBar) { cdBar.style.width = '0%'; cdBar.style.background = 'var(--muted2)'; }
-    return;
-  }
-  if (!e.durationMs) {
-    if (cdNum) { cdNum.textContent = 'P1 Active'; cdNum.style.color = 'var(--col-p1)'; cdNum.style.fontSize = '34px'; }
-    if (cdLbl) cdLbl.textContent = '';
-    if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = 'var(--col-p1)'; }
-    return;
-  }
-
-  if (cdNum) cdNum.style.fontSize = '';
+  var cdNum  = card.querySelector('.js-cdnum');
+  var cdLbl  = card.querySelector('.js-cdlbl');
+  var cdBar  = card.querySelector('.js-cdbar');
   var phSec  = card.querySelector('.js-phsec');
   var phNum  = card.querySelector('.js-phnum');
   var phAppr = card.querySelector('.js-phapprox');
@@ -348,38 +335,54 @@ function tick1(card, e, now) {
   var phBar  = card.querySelector('.js-phbar');
   var phList = card.querySelector('.js-phlist');
 
-  if (st.rem > 0) {
+  var snaps   = e.snapshots || [];
+  var hasSnap = snaps.length > 0;
+
+  // ── Countdown section ────────────────────────────────────────
+  if (!e.killTime) {
+    if (cdNum) { cdNum.textContent = '--:--'; cdNum.style.color = 'var(--muted)'; cdNum.style.fontSize = ''; }
+    if (cdLbl) cdLbl.textContent = e.missing ? 'marked missing' : 'awaiting kill data';
+    if (cdBar) { cdBar.style.width = '0%'; cdBar.style.background = 'var(--muted2)'; }
+  } else if (!e.durationMs) {
+    if (cdNum) { cdNum.textContent = 'P1 Active'; cdNum.style.color = 'var(--col-p1)'; cdNum.style.fontSize = '34px'; }
+    if (cdLbl) cdLbl.textContent = '';
+    if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = 'var(--col-p1)'; }
+  } else if (st.rem > 0) {
     var col = st.s === 'soon' ? 'var(--col-soon)' : 'var(--col-wait)';
-    if (cdNum) { cdNum.textContent = fmtCd(st.rem); cdNum.style.color = col; }
+    if (cdNum) { cdNum.textContent = fmtCd(st.rem); cdNum.style.color = col; cdNum.style.fontSize = ''; }
     if (cdLbl) cdLbl.textContent = 'P1 at ' + hhmm(e.killTime + e.durationMs);
     if (cdBar) { cdBar.style.width = Math.min(100, st.pct * 100).toFixed(1) + '%'; cdBar.style.background = col; }
-    if (phSec) phSec.classList.remove('show');
   } else {
     var col2 = st.s === 'late' ? 'var(--col-late)' : 'var(--col-p1)';
-    if (cdNum) { cdNum.textContent = fmtOver(st.rem); cdNum.style.color = col2; }
+    if (cdNum) { cdNum.textContent = fmtOver(st.rem); cdNum.style.color = col2; cdNum.style.fontSize = ''; }
     if (cdLbl) cdLbl.textContent = st.s === 'late' ? 'Overtime!' : 'P1 Active';
     if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = col2; }
+  }
 
-    // Phase section
-    if (phSec) {
-      phSec.classList.add('show');
-      var ph = estimatePhase(e, now);
+  // ── Phase section — show whenever snapshots exist OR boss is in p1/late ──
+  var showPhase = hasSnap || st.s === 'p1' || st.s === 'late';
+  if (phSec) phSec.classList.toggle('show', showPhase);
+
+  if (showPhase && phSec) {
+    var ph = estimatePhase(e, now);
+    if (ph !== null) {
       var pct = Math.min(100, ((ph - 1) / 4) * 100);
-      var snaps = e.snapshots || [];
-      var hasSnaps = snaps.length > 0;
-
       if (phNum) { phNum.textContent = ph.toFixed(1); phNum.style.color = ph >= 5 ? 'var(--col-late)' : 'var(--col-p1)'; }
-      if (phAppr) phAppr.textContent = hasSnaps ? '≈ estimated' : '≈ no snapshots';
-      if (phSnap) phSnap.textContent = hasSnaps ? snaps.length + ' snap' + (snaps.length > 1 ? 's' : '') : '';
       if (phBar) phBar.style.width = pct.toFixed(1) + '%';
-
-      // Snapshot tags
-      if (phList) {
-        phList.innerHTML = snaps.slice(-5).map(function(s) {
-          var ago = Math.round((now - s.time) / 60000);
-          return '<span class="ph-snap-tag">P' + s.phase.toFixed(1) + ' · ' + ago + 'm ago</span>';
-        }).join('');
-      }
+    } else if (hasSnap) {
+      // Show last snapshot directly when no kill time for projection
+      var lastPh = snaps[snaps.length - 1].phase;
+      var pct2 = Math.min(100, ((lastPh - 1) / 4) * 100);
+      if (phNum) { phNum.textContent = lastPh.toFixed(1); phNum.style.color = 'var(--col-p1)'; }
+      if (phBar) phBar.style.width = pct2.toFixed(1) + '%';
+    }
+    if (phAppr) phAppr.textContent = hasSnap ? '≈ estimated from snapshot' : '≈ estimated';
+    if (phSnap) phSnap.textContent = hasSnap ? snaps.length + ' snap' + (snaps.length > 1 ? 's' : '') : '';
+    if (phList) {
+      phList.innerHTML = snaps.slice(-5).map(function(s) {
+        var ago = Math.round((now - s.time) / 60000);
+        return '<span class="ph-snap-tag">P' + s.phase.toFixed(1) + ' · ' + ago + 'm ago</span>';
+      }).join('');
     }
   }
 }
