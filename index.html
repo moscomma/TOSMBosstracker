@@ -444,8 +444,7 @@ function getState(e, now) {
   var pct     = Math.min(1, elapsed / e.durationMs);
   var s;
   if      (e.missing)         s = 'miss';
-  else if (rem > 5 * 60000)   s = 'wait';
-  else if (rem > 0)           s = 'soon';
+  else if (rem > 0)           s = 'wait';   // 'soon' merged into 'wait' — single waiting category
   else if (rem > -20 * 60000) s = 'p1';
   else                        s = 'late';
   return { s: s, rem: rem, pct: pct };
