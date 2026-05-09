@@ -109,18 +109,39 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .note-row{font-family:var(--body);font-size:12px;color:var(--soft);background:var(--bg2);border-radius:6px;padding:5px 10px;margin-top:8px}
 .ro-label{text-align:center;font-family:var(--body);font-size:10px;font-weight:500;letter-spacing:1px;color:var(--muted2);padding:4px 0 0}
 
+/* countdown bar hide during P1 */
+.cd-bar-wrap.hidden{display:none}
+
 /* phase section */
 .ph-section{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
 .ph-section.show{display:block}
-.ph-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.ph-num{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--col-p1);line-height:1}
-.ph-approx{font-family:var(--body);font-size:10px;font-weight:500;color:var(--muted);letter-spacing:.5px}
-.ph-snap{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:auto}
-.ph-bar-wrap{background:var(--muted2);border-radius:3px;height:4px;overflow:hidden}
-.ph-bar{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--col-wait),var(--col-soon),var(--col-p1));transition:width 1s linear}
-.ph-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:3px}
-.ph-snap-list{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
+.ph-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.ph-elapsed{font-family:var(--body);font-size:11px;font-weight:500;color:var(--muted)}
+.ph-spawn-est{font-family:var(--mono);font-size:10px;color:var(--soft)}
+.ph-bar-outer{position:relative;background:var(--muted2);border-radius:4px;height:8px;overflow:hidden;margin-bottom:4px}
+.ph-bar{height:100%;border-radius:4px;transition:width 1s linear,background .5s;position:relative}
+.ph-bar::after{content:'';position:absolute;right:0;top:0;bottom:0;width:4px;background:rgba(255,255,255,.3);border-radius:0 4px 4px 0}
+.ph-tick{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.15)}
+.ph-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted2);margin-bottom:6px}
+.ph-approx{font-family:var(--body);font-size:10px;font-weight:500;color:var(--muted);margin-bottom:4px}
+.ph-snap-list{display:flex;flex-wrap:wrap;gap:4px}
 .ph-snap-tag{font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 7px;color:var(--soft)}
+
+/* insights panel */
+.ins-panel{display:none;background:var(--panel);border:1px solid var(--border2);border-radius:12px;padding:14px 18px 10px;margin-bottom:16px;animation:popIn .22s ease}
+.ins-panel.show{display:block}
+@keyframes popIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.ins-title{font-family:var(--disp);font-size:11px;letter-spacing:3px;color:var(--gold);display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.ins-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;margin-left:auto;line-height:1}
+.ins-grid{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
+.ins-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:170px;flex-shrink:0}
+.ins-lv{font-family:var(--disp);font-size:13px;letter-spacing:2px;color:var(--gold);margin-bottom:8px}
+.ins-row{font-family:var(--body);font-size:11px;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between;gap:8px}
+.ins-val{color:var(--text);font-weight:600;font-family:var(--mono)}
+.ins-empty{font-family:var(--body);font-size:12px;color:var(--muted2);padding:10px 0}
+.ins-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
+.ins-btn:hover{border-color:var(--gold);color:var(--gold)}
+.ins-btn.on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
 </style>
 </head>
 <body>
@@ -149,11 +170,19 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="fb" data-f="soon">Soon <span class="fbc" id="fc-soon"></span></button>
     <button class="fb" data-f="p1">P1 Active <span class="fbc" id="fc-p1"></span></button>
     <button class="fb" data-f="late">Late <span class="fbc" id="fc-late"></span></button>
+    <button class="ins-btn" id="insBtn">📊 Insights</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
   </div>
 </header>
 
 <main>
+  <div id="insPanel" class="ins-panel">
+    <div class="ins-title">
+      INSIGHTS
+      <button class="ins-close" id="insClose">✕</button>
+    </div>
+    <div class="ins-grid" id="insGrid"></div>
+  </div>
   <div id="empty">No bosses being tracked right now.</div>
   <div id="grid"></div>
 </main>
@@ -179,6 +208,7 @@ var tickIv     = null;
 var prevStates = {};
 var soundOn    = false;
 var audioCtx   = null;
+var insOpen    = false;
 
 // ── Sound ─────────────────────────────────────────────────────
 function getAudioCtx() {
@@ -284,20 +314,36 @@ function cardHTML(e) {
       '<div class="cd-bar-wrap"><div class="cd-bar js-cdbar" style="width:0%"></div></div>',
     '</div>',
     '<div class="ph-section js-phsec">',
-      '<div class="ph-row">',
-        '<div class="ph-num js-phnum">—</div>',
-        '<div>',
-          '<div class="ph-approx js-phapprox"></div>',
-          '<div class="ph-snap js-phsnap"></div>',
-        '</div>',
+      '<div class="ph-hdr">',
+        '<span class="ph-elapsed js-phelapsed"></span>',
+        '<span class="ph-spawn-est js-phest"></span>',
       '</div>',
-      '<div class="ph-bar-wrap"><div class="ph-bar js-phbar" style="width:0%"></div></div>',
+      '<div class="ph-bar-outer">',
+        '<div class="ph-bar js-phbar" style="width:0%"></div>',
+        '<div class="ph-tick" style="left:25%"></div>',
+        '<div class="ph-tick" style="left:50%"></div>',
+        '<div class="ph-tick" style="left:75%"></div>',
+      '</div>',
       '<div class="ph-labels"><span>P1</span><span>P2</span><span>P3</span><span>P4</span><span>Boss</span></div>',
+      '<div class="ph-approx js-phapprox"></div>',
       '<div class="ph-snap-list js-phlist"></div>',
     '</div>',
     e.note ? '<div class="note-row">'+esc(e.note)+'</div>' : '',
     '<div class="ro-label">read-only · live</div>',
   ].join('');
+}
+
+// ── Phase helpers ─────────────────────────────────────────────
+function phaseColor(ph) {
+  if (ph < 2) return 'var(--col-p1)';
+  if (ph < 3) return '#4ea8de';
+  if (ph < 4) return 'var(--col-soon)';
+  return 'var(--col-late)';
+}
+function phaseName(ph) {
+  if (!ph || ph < 1) return 'P1 Active';
+  var n = Math.floor(ph);
+  return n >= 5 ? 'Boss!' : 'Phase ' + n;
 }
 
 // ── Phase estimation ──────────────────────────────────────────
@@ -325,59 +371,78 @@ function tick1(card, e, now) {
   var badge = card.querySelector('.state-badge');
   if (badge) { badge.className = 'state-badge ' + S_BADGE[st.s]; badge.textContent = S_LABEL[st.s]; }
 
-  var cdNum  = card.querySelector('.js-cdnum');
-  var cdLbl  = card.querySelector('.js-cdlbl');
-  var cdBar  = card.querySelector('.js-cdbar');
-  var phSec  = card.querySelector('.js-phsec');
-  var phNum  = card.querySelector('.js-phnum');
-  var phAppr = card.querySelector('.js-phapprox');
-  var phSnap = card.querySelector('.js-phsnap');
-  var phBar  = card.querySelector('.js-phbar');
-  var phList = card.querySelector('.js-phlist');
+  var cdNum     = card.querySelector('.js-cdnum');
+  var cdLbl     = card.querySelector('.js-cdlbl');
+  var cdBar     = card.querySelector('.js-cdbar');
+  var cdBarWrap = card.querySelector('.cd-bar-wrap');
+  var phSec     = card.querySelector('.js-phsec');
+  var phElapsed = card.querySelector('.js-phelapsed');
+  var phEst     = card.querySelector('.js-phest');
+  var phAppr    = card.querySelector('.js-phapprox');
+  var phBar     = card.querySelector('.js-phbar');
+  var phList    = card.querySelector('.js-phlist');
 
-  var snaps   = e.snapshots || [];
-  var hasSnap = snaps.length > 0;
+  var snaps    = e.snapshots || [];
+  var hasSnap  = snaps.length > 0;
+  var isActive = st.s === 'p1' || st.s === 'late';
 
-  // ── Countdown section ────────────────────────────────────────
-  if (!e.killTime) {
+  // ── Countdown / Phase name display ────────────────────────────
+  if (isActive) {
+    if (cdBarWrap) cdBarWrap.classList.add('hidden');
+    var ph = estimatePhase(e, now);
+    var phStr = ph !== null ? phaseName(ph) : 'P1 Active';
+    var phCol = ph !== null ? phaseColor(ph) : 'var(--col-p1)';
+    if (cdNum) { cdNum.textContent = phStr; cdNum.style.color = phCol; cdNum.style.fontSize = '36px'; }
+    var sinceP1Ms = now - (e.killTime + e.durationMs);
+    if (cdLbl) cdLbl.textContent = fmtOver(sinceP1Ms) + ' since P1';
+  } else if (!e.killTime) {
+    if (cdBarWrap) cdBarWrap.classList.remove('hidden');
     if (cdNum) { cdNum.textContent = '--:--'; cdNum.style.color = 'var(--muted)'; cdNum.style.fontSize = ''; }
     if (cdLbl) cdLbl.textContent = e.missing ? 'marked missing' : 'awaiting kill data';
     if (cdBar) { cdBar.style.width = '0%'; cdBar.style.background = 'var(--muted2)'; }
   } else if (!e.durationMs) {
-    if (cdNum) { cdNum.textContent = 'P1 Active'; cdNum.style.color = 'var(--col-p1)'; cdNum.style.fontSize = '34px'; }
+    if (cdBarWrap) cdBarWrap.classList.remove('hidden');
+    if (cdNum) { cdNum.textContent = 'P1 Active'; cdNum.style.color = 'var(--col-p1)'; cdNum.style.fontSize = '36px'; }
     if (cdLbl) cdLbl.textContent = '';
     if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = 'var(--col-p1)'; }
-  } else if (st.rem > 0) {
+  } else {
+    if (cdBarWrap) cdBarWrap.classList.remove('hidden');
     var col = st.s === 'soon' ? 'var(--col-soon)' : 'var(--col-wait)';
     if (cdNum) { cdNum.textContent = fmtCd(st.rem); cdNum.style.color = col; cdNum.style.fontSize = ''; }
     if (cdLbl) cdLbl.textContent = 'P1 at ' + hhmm(e.killTime + e.durationMs);
     if (cdBar) { cdBar.style.width = Math.min(100, st.pct * 100).toFixed(1) + '%'; cdBar.style.background = col; }
-  } else {
-    var col2 = st.s === 'late' ? 'var(--col-late)' : 'var(--col-p1)';
-    if (cdNum) { cdNum.textContent = fmtOver(st.rem); cdNum.style.color = col2; cdNum.style.fontSize = ''; }
-    if (cdLbl) cdLbl.textContent = st.s === 'late' ? 'Overtime!' : 'P1 Active';
-    if (cdBar) { cdBar.style.width = '100%'; cdBar.style.background = col2; }
   }
 
-  // ── Phase section — show whenever snapshots exist OR boss is in p1/late ──
-  var showPhase = hasSnap || st.s === 'p1' || st.s === 'late';
+  // ── Phase section — show when snapshots exist OR boss is active ──
+  var showPhase = hasSnap || isActive;
   if (phSec) phSec.classList.toggle('show', showPhase);
 
-  if (showPhase && phSec) {
-    var ph = estimatePhase(e, now);
-    if (ph !== null) {
-      var pct = Math.min(100, ((ph - 1) / 4) * 100);
-      if (phNum) { phNum.textContent = ph.toFixed(1); phNum.style.color = ph >= 5 ? 'var(--col-late)' : 'var(--col-p1)'; }
-      if (phBar) phBar.style.width = pct.toFixed(1) + '%';
-    } else if (hasSnap) {
-      // Show last snapshot directly when no kill time for projection
-      var lastPh = snaps[snaps.length - 1].phase;
-      var pct2 = Math.min(100, ((lastPh - 1) / 4) * 100);
-      if (phNum) { phNum.textContent = lastPh.toFixed(1); phNum.style.color = 'var(--col-p1)'; }
-      if (phBar) phBar.style.width = pct2.toFixed(1) + '%';
+  if (showPhase) {
+    var phEst2 = estimatePhase(e, now);
+    var barPh  = phEst2 !== null ? phEst2 : (hasSnap ? snaps[snaps.length - 1].phase : null);
+
+    if (barPh !== null) {
+      var pct = Math.min(100, ((barPh - 1) / 4) * 100);
+      if (phBar) { phBar.style.width = pct.toFixed(1) + '%'; phBar.style.background = phaseColor(barPh); }
     }
-    if (phAppr) phAppr.textContent = hasSnap ? '≈ estimated from snapshot' : '≈ estimated';
-    if (phSnap) phSnap.textContent = hasSnap ? snaps.length + ' snap' + (snaps.length > 1 ? 's' : '') : '';
+
+    if (phElapsed) {
+      if (e.killTime && e.durationMs) {
+        var p1Start = e.killTime + e.durationMs;
+        if (now >= p1Start) {
+          phElapsed.textContent = Math.round((now - p1Start) / 60000) + ' min in P1';
+        } else {
+          phElapsed.textContent = 'Phase progress';
+        }
+      } else {
+        phElapsed.textContent = hasSnap ? 'Phase snapshots' : '';
+      }
+    }
+
+    if (phEst) phEst.textContent = phEst2 !== null ? '≈ ' + phEst2.toFixed(1) : '';
+
+    if (phAppr) phAppr.textContent = hasSnap ? '≈ estimated from snapshot' : '≈ estimated from P1 time';
+
     if (phList) {
       phList.innerHTML = snaps.slice(-5).map(function(s) {
         var ago = Math.round((now - s.time) / 60000);
@@ -442,6 +507,8 @@ function renderAll() {
     var cur = grid.children[idx];
     if (cur !== card) grid.insertBefore(card, cur || null);
   });
+
+  if (insOpen) renderInsights();
 }
 
 // ── Tick loop ─────────────────────────────────────────────────
@@ -452,8 +519,61 @@ function startTick() {
     document.querySelectorAll('.card').forEach(function(card){
       var e = entries[card.dataset.id]; if (e) tick1(card, e, now);
     });
+    if (insOpen) renderInsights();
   }, 1000);
 }
+
+// ── Insights panel ────────────────────────────────────────────
+function renderInsights() {
+  var igrid = document.getElementById('insGrid');
+  if (!igrid) return;
+  var now  = Date.now();
+  var list = Object.keys(entries).map(function(k){ return entries[k]; });
+  var active = list.filter(function(e){ return e.killTime || (e.snapshots && e.snapshots.length > 0); });
+  active.sort(function(a, b){ return sortScore(a, now) - sortScore(b, now); });
+
+  if (!active.length) {
+    igrid.innerHTML = '<div class="ins-empty">No boss data yet — add kills from the Electron app or Discord bot.</div>';
+    return;
+  }
+
+  igrid.innerHTML = active.map(function(e) {
+    var snaps  = e.snapshots || [];
+    var ph     = estimatePhase(e, now);
+    var phLine = ph !== null ? ph.toFixed(1) : '—';
+    var p1Line = '—';
+    if (e.killTime && e.durationMs) {
+      var p1At = e.killTime + e.durationMs;
+      if (p1At > now) {
+        p1Line = 'in ' + fmtCd(p1At - now);
+      } else {
+        p1Line = hhmm(p1At) + ' (' + Math.round((now - p1At) / 60000) + 'm ago)';
+      }
+    }
+    var lastSnap = snaps.length > 0 ? 'P' + snaps[snaps.length - 1].phase.toFixed(1) : null;
+    return [
+      '<div class="ins-card">',
+        '<div class="ins-lv">LV'+esc(e.level||'?')+' CH'+esc(e.channel||'?')+'</div>',
+        '<div class="ins-row"><span>Phase</span><span class="ins-val">'+phLine+'</span></div>',
+        '<div class="ins-row"><span>P1 at</span><span class="ins-val">'+p1Line+'</span></div>',
+        lastSnap ? '<div class="ins-row"><span>Last snap</span><span class="ins-val">'+lastSnap+'</span></div>' : '',
+        '<div class="ins-row"><span>Snaps</span><span class="ins-val">'+snaps.length+'</span></div>',
+      '</div>',
+    ].join('');
+  }).join('');
+}
+
+document.getElementById('insBtn').addEventListener('click', function(){
+  insOpen = !insOpen;
+  this.classList.toggle('on', insOpen);
+  document.getElementById('insPanel').classList.toggle('show', insOpen);
+  if (insOpen) renderInsights();
+});
+document.getElementById('insClose').addEventListener('click', function(){
+  insOpen = false;
+  document.getElementById('insBtn').classList.remove('on');
+  document.getElementById('insPanel').classList.remove('show');
+});
 
 // ── Filter UI ─────────────────────────────────────────────────
 document.querySelectorAll('.fb').forEach(function(btn){
