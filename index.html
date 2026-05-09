@@ -369,7 +369,18 @@ function checkTransition(id, newState) {
   if (!prev || prev === newState) return;
   if      (newState === 'soon')  beep(SOUND_SOON);
   else if (newState === 'p1')    beep(SOUND_P1);
-  else if (newState === 'spawn') beep(SOUND_SPAWN);
+  else if (newState === 'spawn') { beep(SOUND_SPAWN); autoFocusSpawn(); }
+}
+
+// When any card freshly transitions to spawn, auto-switch the filter to
+// the Boss Respawn category so the user's attention lands on it.
+function autoFocusSpawn() {
+  if (filt === 'spawn') return;
+  filt = 'spawn';
+  document.querySelectorAll('.fb').forEach(function(b){
+    b.classList.toggle('on', b.dataset.f === 'spawn');
+  });
+  renderAll();
 }
 
 function checkPhaseAlert(id, currentPhase) {
