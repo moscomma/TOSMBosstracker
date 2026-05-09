@@ -149,7 +149,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .ins-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
 .ins-btn:hover{border-color:var(--gold);color:var(--gold)}
 .ins-btn.on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
-.ins-card{min-width:220px}
+.ins-card{min-width:260px;max-width:320px}
 .conf-ad{color:var(--col-p1)}
 .conf-lr{color:var(--col-soon)}
 .conf-fb{color:var(--muted)}
@@ -157,6 +157,16 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .ins-seg{font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;color:var(--soft)}
 .ins-trail{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4;word-break:break-word}
 .ins-now{font-family:var(--mono);font-size:11px;color:var(--soft);font-weight:400;letter-spacing:0;margin-left:auto}
+.ins-sub{color:var(--muted);font-family:var(--mono);font-size:10px;letter-spacing:0;font-weight:400;margin-left:4px}
+.ins-ch-list{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px}
+.ins-ch-row{display:grid;grid-template-columns:50px 60px 1fr;gap:6px;align-items:center;font-family:var(--mono);font-size:11px;padding:3px 6px;background:var(--bg2);border-radius:5px}
+.ins-ch-ch{color:var(--gold);font-weight:700}
+.ins-ch-ph{color:var(--col-p1);font-weight:600}
+.ins-ch-ph.p3{color:var(--col-soon)}
+.ins-ch-ph.p4{color:var(--col-late)}
+.ins-ch-ph.spawn{color:var(--gold)}
+.ins-ch-sp{color:var(--soft);font-size:10px;text-align:right}
+.ins-sd{color:var(--muted);font-size:9px}
 .ins-close{margin-left:0 !important}
 .ins-bk{font-size:9px;color:var(--muted);margin-left:4px}
 
@@ -193,12 +203,18 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .mod-btn.danger{background:#d4586818;border-color:var(--col-late);color:var(--col-late)}
 .mod-btn.danger:hover{background:#d4586828}
 .mod-btn:disabled{opacity:.5;cursor:wait}
-.ed-list{max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}
-.ed-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-family:var(--mono);font-size:12px;display:flex;justify-content:space-between;align-items:center}
-.ed-item:last-child{border-bottom:none}
-.ed-item:hover{background:#1f2238}
-.ed-item.sel{background:#6ecf9518;color:var(--col-p1)}
-.ed-meta{font-size:10px;color:var(--muted)}
+.mod-hint code{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-family:var(--mono);font-size:10px;color:var(--col-p1)}
+
+/* ── Per-card action menu ── */
+.card{position:relative}
+.card-menu-btn{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);font-size:18px;font-weight:700;cursor:pointer;padding:0 8px;line-height:1;border-radius:4px;z-index:5;transition:all .15s}
+.card-menu-btn:hover{background:var(--muted2);color:var(--text)}
+.card-menu{position:fixed;background:var(--panel);border:1px solid var(--border2);border-radius:8px;padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.6);z-index:300;min-width:220px;flex-direction:column;display:flex;animation:popIn .14s ease}
+.card-menu button{font-family:var(--body);font-size:12px;font-weight:500;text-align:left;padding:8px 12px;background:none;border:none;color:var(--text);cursor:pointer;border-radius:6px;letter-spacing:.3px}
+.card-menu button:hover{background:var(--bg2)}
+.card-menu button.danger{color:var(--col-late)}
+.card-menu button.danger:hover{background:#d4586818}
+.card-menu .sep{border-top:1px solid var(--border);margin:4px 0}
 </style>
 </head>
 <body>
@@ -247,76 +263,40 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   <div id="grid"></div>
 </main>
 
-<!-- Add / Edit modal -->
+<!-- Add modal — single Discord-style command input -->
 <div class="mod-bg" id="modBg">
-  <div class="mod" role="dialog" aria-modal="true">
+  <form class="mod" role="dialog" aria-modal="true" id="addForm" autocomplete="off">
     <div class="mod-h">
       <div class="mod-t">ADD BOSS DATA</div>
-      <button class="mod-x" id="modX" title="Close">✕</button>
+      <button type="button" class="mod-x" id="modX" title="Close">✕</button>
     </div>
-    <div class="mod-tabs">
-      <button class="mod-tab on" data-pane="kill">Kill</button>
-      <button class="mod-tab"    data-pane="snap">Snapshot</button>
-      <button class="mod-tab"    data-pane="edit">Edit / Delete</button>
+    <div class="mod-fld">
+      <label class="mod-lbl">Type a command — same syntax as Discord</label>
+      <input class="mod-in" id="addCmd" placeholder="145 3 1.20" autofocus />
+      <div class="mod-hint">
+        <code>145 3 1.20</code> → LV145 CH3 killed, P1 in 1h 20m<br/>
+        <code>145 3 50</code> → killed, P1 in 50 min<br/>
+        <code>145 3 1:30</code> → killed, P1 in 1h 30m<br/>
+        <code>145 3 4.2</code> → currently Phase 4.2<br/>
+        <code>145 3 on</code> → boss respawned (= 5.0)
+      </div>
     </div>
+    <div class="mod-msg" id="addMsg"></div>
+    <div class="mod-act">
+      <button type="button" class="mod-btn" id="addCancel">Cancel</button>
+      <button type="submit"  class="mod-btn primary" id="addSave">Save</button>
+    </div>
+  </form>
+</div>
 
-    <!-- KILL pane -->
-    <div class="mod-pane on" data-pane="kill">
-      <div class="mod-row">
-        <div class="mod-fld"><label class="mod-lbl">Level</label><input class="mod-in" id="kLvl" type="number" min="1" max="999" placeholder="145"/></div>
-        <div class="mod-fld"><label class="mod-lbl">Channel</label><input class="mod-in" id="kCh" type="number" min="1" max="99" placeholder="3"/></div>
-      </div>
-      <div class="mod-fld">
-        <label class="mod-lbl">Time to P1</label>
-        <input class="mod-in" id="kDur" placeholder="1h 30m  or  90m  or  5400"/>
-        <div class="mod-hint">Examples: <code>1h30m</code>, <code>90m</code>, <code>5400</code> (seconds)</div>
-      </div>
-      <div class="mod-msg" id="kMsg"></div>
-      <div class="mod-act">
-        <button class="mod-btn" id="kCancel">Cancel</button>
-        <button class="mod-btn primary" id="kSave">Save kill</button>
-      </div>
-    </div>
-
-    <!-- SNAPSHOT pane -->
-    <div class="mod-pane" data-pane="snap">
-      <div class="mod-row">
-        <div class="mod-fld"><label class="mod-lbl">Level</label><input class="mod-in" id="sLvl" type="number" min="1" max="999" placeholder="145"/></div>
-        <div class="mod-fld"><label class="mod-lbl">Channel</label><input class="mod-in" id="sCh" type="number" min="1" max="99" placeholder="3"/></div>
-      </div>
-      <div class="mod-fld">
-        <label class="mod-lbl">Phase (1.0 – 5.0)</label>
-        <input class="mod-in" id="sPh" placeholder="4.2  or  on  (= 5.0 respawn)"/>
-        <div class="mod-hint">5.0 or <code>on</code> = boss respawned</div>
-      </div>
-      <div class="mod-msg" id="sMsg"></div>
-      <div class="mod-act">
-        <button class="mod-btn" id="sCancel">Cancel</button>
-        <button class="mod-btn primary" id="sSave">Save snapshot</button>
-      </div>
-    </div>
-
-    <!-- EDIT/DELETE pane -->
-    <div class="mod-pane" data-pane="edit">
-      <div class="mod-fld">
-        <label class="mod-lbl">Pick an entry</label>
-        <div class="ed-list" id="eList"></div>
-      </div>
-      <div class="mod-row" style="margin-top:10px">
-        <div class="mod-fld">
-          <label class="mod-lbl">New time-to-P1 (optional)</label>
-          <input class="mod-in" id="eDur" placeholder="leave empty to skip"/>
-        </div>
-      </div>
-      <div class="mod-msg" id="eMsg"></div>
-      <div class="mod-act">
-        <button class="mod-btn"        id="eCancel">Cancel</button>
-        <button class="mod-btn danger" id="eDel">Delete</button>
-        <button class="mod-btn primary" id="eSave">Save edit</button>
-      </div>
-    </div>
-
-  </div>
+<!-- Card action menu (per-card popup) -->
+<div class="card-menu" id="cardMenu" style="display:none">
+  <button data-act="respawn">🔥 Boss respawned (5.0)</button>
+  <button data-act="snap">+ Add phase snapshot</button>
+  <button data-act="time">⏱ Edit time / countdown</button>
+  <button data-act="ch"># Edit channel</button>
+  <button data-act="lv">L Edit level</button>
+  <button class="danger" data-act="del">🗑 Delete entry</button>
 </div>
 
 <!--
@@ -505,10 +485,34 @@ function hourBucket(ts) {
 }
 var BUCKET_LABEL = { peak: '🔥 peak', late: '🌃 late', sleep: '😴 sleep', day: '☀ day' };
 
+// ── Activity gating ──────────────────────────────────────────
+// A level is "active" if any of its entries had a snapshot or kill
+// within the last INACTIVE_MS. Inactive levels are dropped from
+// rebuildKnowledge sample derivation and from the insights panel.
+var INACTIVE_MS = 10 * 60 * 1000;
+
+function entryLastActivity(e) {
+  var t = 0;
+  if (e.killTime > t) t = e.killTime;
+  if (e.snapshots && e.snapshots.length) {
+    var last = e.snapshots[e.snapshots.length - 1].time || 0;
+    if (last > t) t = last;
+  }
+  return t;
+}
+
+function levelIsActive(es, now) {
+  for (var i = 0; i < es.length; i++) {
+    if (now - entryLastActivity(es[i]) <= INACTIVE_MS) return true;
+  }
+  return false;
+}
+
 // ── Card HTML ─────────────────────────────────────────────────
 function cardHTML(e) {
   var st = getState(e, Date.now());
   return [
+    '<button class="card-menu-btn js-menu" data-id="'+esc(e.id)+'" title="Edit / Delete">⋯</button>',
     '<div class="ch">',
       '<div class="chips">',
         '<div class="chip"><span class="cl">LV</span><span class="cv">'+esc(e.level||'?')+'</span></div>',
@@ -537,7 +541,6 @@ function cardHTML(e) {
       '<div class="ph-snap-list js-phlist"></div>',
     '</div>',
     e.note ? '<div class="note-row">'+esc(e.note)+'</div>' : '',
-    '<div class="ro-label">read-only · live</div>',
   ].join('');
 }
 
@@ -558,12 +561,15 @@ function phaseName(ph) {
 // ── Phase estimation (learning-aware) ─────────────────────────
 var DEFAULT_PHASE_SPEED = 3 / (90 * 60000); // 3 phases per 90 min (cold-start fallback)
 
-// Build per-level speed samples from currently-active entry snapshots.
+// Build per-level speed samples from current entry snapshots, then merge in
+// the localStorage-backed history so learning survives across kill cycles.
 function rebuildKnowledge() {
   knowledge = {};
+  var now = Date.now();
   Object.keys(entries).forEach(function(k){
     var e = entries[k];
     if (!e.level || !e.snapshots || e.snapshots.length < 2) return;
+    if (now - entryLastActivity(e) > INACTIVE_MS) return;
     var key = 'lv' + e.level;
     if (!knowledge[key]) knowledge[key] = [];
     var snaps = e.snapshots;
@@ -579,6 +585,14 @@ function rebuildKnowledge() {
       var w = ratio > 1.2 ? 4 : ratio < 0.8 ? 1 : 2;
       knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, w: w, hb: hourBucket(snaps[i].time) });
     }
+  });
+  // Merge persisted history (older samples from past cycles)
+  Object.keys(persistedSamples).forEach(function(key){
+    if (!knowledge[key]) knowledge[key] = [];
+    // Avoid duplicating samples already present (same ts)
+    var seen = {};
+    knowledge[key].forEach(function(s){ seen[s.ts] = true; });
+    persistedSamples[key].forEach(function(s){ if (!seen[s.ts]) knowledge[key].push(s); });
   });
 }
 
@@ -942,61 +956,87 @@ function renderInsights() {
   var now  = Date.now();
   if (inow) inow.textContent = 'BKK ' + bangkokTimeStr(now) + ' · ' + BUCKET_LABEL[hourBucket(now)];
 
-  var list = Object.keys(entries).map(function(k){ return entries[k]; });
-  var active = list.filter(function(e){ return e.killTime || (e.snapshots && e.snapshots.length > 0); });
-  active.sort(function(a, b){ return sortScore(a, now) - sortScore(b, now); });
+  // Group active entries by level
+  var byLevel = {};
+  Object.keys(entries).forEach(function(k){
+    var e = entries[k];
+    if (!e.level) return;
+    if (!e.killTime && (!e.snapshots || !e.snapshots.length)) return;
+    var key = 'lv' + e.level;
+    if (!byLevel[key]) byLevel[key] = [];
+    byLevel[key].push(e);
+  });
 
-  if (!active.length) {
-    igrid.innerHTML = '<div class="ins-empty">No boss data yet — add kills from the Electron app or Discord bot.</div>';
+  var levelKeys = Object.keys(byLevel).sort(function(a, b){
+    var na = parseInt(a.replace(/^lv/,''),10), nb = parseInt(b.replace(/^lv/,''),10);
+    return na - nb;
+  });
+  // Drop levels with no activity in the last 10 min — stale data shouldn't dilute insights
+  levelKeys = levelKeys.filter(function(key){ return levelIsActive(byLevel[key], now); });
+  if (!levelKeys.length) {
+    igrid.innerHTML = '<div class="ins-empty">No active levels in the last 10 min. Post a snapshot to revive insights.</div>';
     return;
   }
 
-  igrid.innerHTML = active.map(function(e) {
-    var snaps = e.snapshots || [];
-    var phNow = estimatePhase(e, now);
-    var spawn = getSpawnAt(e);
-    var sd    = getSpawnStddev(e);
-    var rate  = getEntryRate(e);
-    var conf  = confidence(e.level);
+  igrid.innerHTML = levelKeys.map(function(key){
+    var lv = key.replace(/^lv/, '');
+    var es = byLevel[key];
+    es.sort(function(a, b){ return sortScore(a, now) - sortScore(b, now); });
 
-    var phLine    = phNow !== null ? phNow.toFixed(2) : '—';
-    var spawnLine = '—';
-    if (spawn) {
-      var bk = '<span class="ins-bk">' + BUCKET_LABEL[hourBucket(spawn)] + '</span>';
-      spawnLine = hhmm(spawn) + ' · ' + (spawn > now ? 'in ' + fmtMin(spawn - now) : fmtMin(now - spawn) + ' ago') + bk;
+    var conf    = confidence(lv);
+    var samples = (knowledge[key] || []);
+
+    // Pooled rate from ALL samples for this level (current + persisted)
+    var avgSpd = null;
+    if (samples.length) {
+      var totalW = 0, sum = 0;
+      samples.forEach(function(s){
+        var dw = s.w * decayWeight(s.ts, now);
+        totalW += dw; sum += s.spd * dw;
+      });
+      avgSpd = totalW > 0 ? sum / totalW : null;
     }
-    var sdLine = (sd && spawn) ? '± ' + fmtMinSec(sd) : '—';
+    var rateLine = avgSpd
+      ? (avgSpd * 60000).toFixed(2) + ' ph/min (' + (avgSpd / DEFAULT_PHASE_SPEED).toFixed(2) + '× ref)'
+      : '—';
 
-    var rateLine = '—';
-    if (rate) {
-      rateLine = (rate * 60000).toFixed(2) + ' ph/min (' + (rate / DEFAULT_PHASE_SPEED).toFixed(2) + '× ref)';
-    }
-
-    // Per-segment ETAs walking forward, each segment uses its own bucket
-    var segLines = [], walkPh = phNow !== null ? phNow : 1.0, walkT = now;
+    // Reference per-segment ETAs (P1 → P5) from now, using current bucket
+    var segLines = [], walkPh = 1.0, walkT = now;
     while (walkPh < 5.0) {
       var segEnd = Math.min(5.0, Math.floor(walkPh) + 1);
-      var spd    = getPhaseSpeed(e.level, Math.floor(walkPh), walkT);
+      var spd    = getPhaseSpeed(lv, Math.floor(walkPh), walkT);
       var dt     = (segEnd - walkPh) / spd;
       segLines.push('P' + Math.floor(walkPh) + ' ' + fmtMin(dt));
-      walkT += dt;
-      walkPh = segEnd;
+      walkT += dt; walkPh = segEnd;
     }
 
-    var trail = snaps.slice(-4).map(function(s){
-      return 'P' + s.phase.toFixed(1) + ' (' + Math.round((now - s.time)/60000) + 'm ago)';
-    }).join(' → ');
+    // Per-channel rows: phase + spawn ETA
+    var chRows = es.map(function(e){
+      var ph = estimatePhase(e, now);
+      var sp = getSpawnAt(e);
+      var sd = getSpawnStddev(e);
+      var phStr = ph !== null ? ph.toFixed(2) : '—';
+      var phCls = ph !== null && ph >= 4 ? 'p4' : (ph !== null && ph >= 3 ? 'p3' : '');
+      if (ph !== null && ph >= 5) phCls = 'spawn';
+      var spStr = '—';
+      if (sp) {
+        spStr = hhmm(sp) + ' · ' + (sp > now ? 'in ' + fmtMin(sp - now) : fmtMin(now - sp) + ' ago');
+        if (sd) spStr += ' <span class="ins-sd">±' + fmtMinSec(sd) + '</span>';
+      }
+      return '<div class="ins-ch-row">'
+           +   '<span class="ins-ch-ch">CH'+esc(e.channel)+'</span>'
+           +   '<span class="ins-ch-ph '+phCls+'">P'+phStr+'</span>'
+           +   '<span class="ins-ch-sp">'+spStr+'</span>'
+           + '</div>';
+    }).join('');
 
     return [
       '<div class="ins-card">',
-        '<div class="ins-lv">LV'+esc(e.level||'?')+' CH'+esc(e.channel||'?')+'</div>',
-        '<div class="ins-row"><span>Phase</span><span class="ins-val">'+phLine+'</span></div>',
-        '<div class="ins-row"><span>Spawn</span><span class="ins-val">'+spawnLine+'</span></div>',
-        '<div class="ins-row"><span>± window</span><span class="ins-val">'+sdLine+'</span></div>',
+        '<div class="ins-lv">LV'+esc(lv)+' <span class="ins-sub">('+ es.length +'ch · '+samples.length+' samples)</span></div>',
         '<div class="ins-row"><span>Rate</span><span class="ins-val">'+rateLine+'</span></div>',
         '<div class="ins-row"><span>Confidence</span><span class="ins-val '+conf.cls+'">'+conf.label+' ('+conf.n+')</span></div>',
         segLines.length ? '<div class="ins-segs">'+segLines.map(function(l){return '<span class="ins-seg">'+l+'</span>';}).join('')+'</div>' : '',
-        trail ? '<div class="ins-trail">'+trail+'</div>' : '',
+        chRows ? '<div class="ins-ch-list">'+chRows+'</div>' : '',
       '</div>',
     ].join('');
   }).join('');
@@ -1057,7 +1097,12 @@ sb.channel('boss-live')
     if (payload.eventType === 'DELETE') {
       delete entries[payload.old.id];
     } else {
-      var e = rowToEntry(payload.new); entries[e.id] = e;
+      var e = rowToEntry(payload.new);
+      entries[e.id] = e;
+      // Persist any new derivable sample so cross-cycle learning grows over time
+      if (e.level && e.snapshots && e.snapshots.length >= 2) {
+        persistLatestSample(String(e.level), e.snapshots);
+      }
     }
     rebuildKnowledge();
     renderAll();
@@ -1066,7 +1111,7 @@ sb.channel('boss-live')
     setLive(status === 'SUBSCRIBED');
   });
 
-// ── Add / Edit modal ─────────────────────────────────────────
+// ── Identity (nickname stored in localStorage) ───────────────
 var nickname = '';
 try { nickname = localStorage.getItem('tosm_nick') || ''; } catch(_) {}
 
@@ -1078,95 +1123,94 @@ function ensureNick() {
   return nickname;
 }
 
-function parseDuration(str) {
-  if (str === null || str === undefined) return null;
-  str = String(str).trim().toLowerCase();
-  if (!str) return null;
-  // h+m form: "1h30m", "1h 30m", "2h", "45m"
-  var hm = str.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?$/);
-  if (hm && (hm[1] || hm[2])) {
-    var h = parseInt(hm[1] || '0', 10), m = parseInt(hm[2] || '0', 10);
-    return (h * 3600 + m * 60) * 1000;
-  }
-  // bare integer = seconds
-  if (/^\d+$/.test(str)) return parseInt(str, 10) * 1000;
-  return null;
-}
-
 function entryId(level, ch) { return 'dc_' + level + '_' + ch; }
 function modMsg(id, text, kind) {
   var el = document.getElementById(id);
+  if (!el) return;
   el.textContent = text || '';
   el.className = 'mod-msg' + (kind ? ' ' + kind : '');
 }
 
-var modBg = document.getElementById('modBg');
-function openModal()  { modBg.classList.add('show');    refreshEditList(); }
-function closeModal() { modBg.classList.remove('show'); }
-document.getElementById('addBtn').addEventListener('click', openModal);
-document.getElementById('modX').addEventListener('click', closeModal);
-modBg.addEventListener('click', function(ev){ if (ev.target === modBg) closeModal(); });
-document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && modBg.classList.contains('show')) closeModal(); });
+// ── Discord-style command parser ─────────────────────────────
+// Returns { kind: 'kill'|'snap', level, ch, durationMs?, phase? } or { error }
+// Disambiguation:
+//   "on"/"spawn"/"respawn"  → snap phase 5.0
+//   "1:30"                  → kill 1h 30m
+//   "1.20" (two-digit dec)  → kill 1h 20m
+//   "1.2"  (one-digit, X∈1-5) → snap phase X.Y
+//   "50"   (bare int)       → kill 50 min
+function parseAddCmd(str) {
+  var parts = String(str || '').trim().toLowerCase().split(/\s+/);
+  if (parts.length < 3) return { error: 'Need: LV CH VALUE  (e.g. 145 3 1.20)' };
+  var lv = parseInt(parts[0], 10);
+  var ch = parseInt(parts[1], 10);
+  if (!lv || !ch) return { error: 'Invalid level or channel' };
+  return parseValueOnly(parts.slice(2).join(' '), lv, ch);
+}
 
-document.querySelectorAll('.mod-tab').forEach(function(t){
-  t.addEventListener('click', function(){
-    var pane = t.dataset.pane;
-    document.querySelectorAll('.mod-tab').forEach(function(x){ x.classList.toggle('on', x.dataset.pane === pane); });
-    document.querySelectorAll('.mod-pane').forEach(function(p){ p.classList.toggle('on', p.dataset.pane === pane); });
-    if (pane === 'edit') refreshEditList();
-  });
-});
+function parseValueOnly(val, lv, ch) {
+  val = String(val || '').trim().toLowerCase();
+  if (!val) return { error: 'Missing value' };
 
-// ── KILL ─────────────────────────────────────────────────────
-async function saveKill() {
-  var lvl  = parseInt(document.getElementById('kLvl').value, 10);
-  var ch   = parseInt(document.getElementById('kCh').value, 10);
-  var dur  = parseDuration(document.getElementById('kDur').value);
-  if (!lvl || !ch)               return modMsg('kMsg', 'Level and channel required', 'err');
-  if (!dur || dur < 5*60000 || dur > 12*3600000)
-                                  return modMsg('kMsg', 'Duration must be between 5 min and 12 h', 'err');
-  var nick = ensureNick();
-  var now  = Date.now();
-  var btn  = document.getElementById('kSave'); btn.disabled = true;
-  modMsg('kMsg', 'Saving…');
+  if (val === 'on' || val === 'spawn' || val === 'respawn') {
+    return { kind: 'snap', level: lv, ch: ch, phase: 5.0 };
+  }
+  // Discord colon style: 1:30
+  if (val.indexOf(':') >= 0) {
+    var pp = val.split(':');
+    if (pp.length === 2) {
+      var hh = parseInt(pp[0], 10), mm = parseInt(pp[1], 10);
+      if (!isNaN(hh) && !isNaN(mm)) {
+        return { kind: 'kill', level: lv, ch: ch, durationMs: (hh * 60 + mm) * 60000 };
+      }
+    }
+  }
+  // Two-decimal: 1.20 = 1h 20m
+  var two = val.match(/^(\d+)\.(\d{2})$/);
+  if (two) {
+    var h2 = parseInt(two[1], 10), m2 = parseInt(two[2], 10);
+    return { kind: 'kill', level: lv, ch: ch, durationMs: (h2 * 60 + m2) * 60000 };
+  }
+  // One-decimal: 1.0 .. 5.9 → phase
+  var one = val.match(/^(\d)\.(\d)$/);
+  if (one) {
+    var ph = parseFloat(val);
+    if (ph >= 1 && ph <= 5) return { kind: 'snap', level: lv, ch: ch, phase: ph };
+  }
+  // Bare integer: 50 → 50 minutes
+  if (/^\d+$/.test(val)) {
+    var n = parseInt(val, 10);
+    if (n > 0) return { kind: 'kill', level: lv, ch: ch, durationMs: n * 60000 };
+  }
+  return { error: 'Unknown value: "' + val + '"' };
+}
+
+// ── Commit helpers (shared by modal + card menu) ─────────────
+async function commitKill(level, ch, durationMs, nick) {
+  if (durationMs < 60000 || durationMs > 12 * 3600000) {
+    throw new Error('Duration must be 1 min – 12 h');
+  }
+  var now = Date.now();
   var { error } = await sb.from('boss_entries').upsert({
-    id: entryId(lvl, ch),
-    level: String(lvl), channel: String(ch),
-    kill_time: now, duration_ms: dur,
+    id: entryId(level, ch),
+    level: String(level), channel: String(ch),
+    kill_time: now, duration_ms: durationMs,
     snapshots: [], note: 'via web @' + nick,
     created_at: now, missing: false, synced_at: now,
   });
-  btn.disabled = false;
-  if (error) return modMsg('kMsg', 'Error: ' + error.message, 'err');
-  modMsg('kMsg', 'Saved ✓', 'ok');
-  document.getElementById('kDur').value = '';
-  setTimeout(closeModal, 600);
+  if (error) throw new Error(error.message);
 }
-document.getElementById('kSave').addEventListener('click', saveKill);
-document.getElementById('kCancel').addEventListener('click', closeModal);
 
-// ── SNAPSHOT ─────────────────────────────────────────────────
-async function saveSnapshot() {
-  var lvl = parseInt(document.getElementById('sLvl').value, 10);
-  var ch  = parseInt(document.getElementById('sCh').value, 10);
-  var raw = String(document.getElementById('sPh').value || '').trim().toLowerCase();
-  var phase;
-  if (raw === 'on' || raw === 'spawn' || raw === 'respawn') phase = 5.0;
-  else phase = parseFloat(raw);
-  if (!lvl || !ch)                 return modMsg('sMsg', 'Level and channel required', 'err');
-  if (!isFinite(phase) || phase < 1 || phase > 5)
-                                    return modMsg('sMsg', 'Phase must be 1.0–5.0 (or "on")', 'err');
-  var nick    = ensureNick();
-  var now     = Date.now();
+async function commitSnapshot(level, ch, phase, nick) {
   var rounded = Math.round(phase * 10) / 10;
-  var id      = entryId(lvl, ch);
-  var btn     = document.getElementById('sSave'); btn.disabled = true;
-  modMsg('sMsg', 'Saving…');
+  if (rounded < 1 || rounded > 5) throw new Error('Phase must be 1.0 – 5.0');
+  var now = Date.now();
+  var id  = entryId(level, ch);
   var { data: existing } = await sb.from('boss_entries').select('*').eq('id', id).maybeSingle();
   var snaps = (existing && existing.snapshots) || [];
   snaps.push({ phase: rounded, time: now });
   var payload = {
-    id: id, level: String(lvl), channel: String(ch),
+    id: id, level: String(level), channel: String(ch),
     snapshots: snaps,
     note: 'via web @' + nick + (rounded >= 5 ? ' · respawn' : ''),
     synced_at: now,
@@ -1175,80 +1219,184 @@ async function saveSnapshot() {
     if (existing.kill_time)   payload.kill_time   = existing.kill_time;
     if (existing.duration_ms) payload.duration_ms = existing.duration_ms;
     if (existing.created_at)  payload.created_at  = existing.created_at;
+    payload.missing = !!existing.missing;
   } else {
     payload.kill_time = 0; payload.duration_ms = 0; payload.created_at = now; payload.missing = false;
   }
   var { error } = await sb.from('boss_entries').upsert(payload);
+  if (error) throw new Error(error.message);
+  // Persist sample for cross-cycle learning
+  if (snaps.length >= 2) persistLatestSample(String(level), snaps);
+}
+
+// ── Modal open / close ───────────────────────────────────────
+var modBg = document.getElementById('modBg');
+function openModal()  { modBg.classList.add('show'); modMsg('addMsg', ''); document.getElementById('addCmd').focus(); }
+function closeModal() { modBg.classList.remove('show'); }
+document.getElementById('addBtn').addEventListener('click', openModal);
+document.getElementById('modX').addEventListener('click', closeModal);
+document.getElementById('addCancel').addEventListener('click', closeModal);
+modBg.addEventListener('click', function(ev){ if (ev.target === modBg) closeModal(); });
+document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && modBg.classList.contains('show')) { closeCardMenu(); closeModal(); } });
+
+document.getElementById('addForm').addEventListener('submit', async function(ev){
+  ev.preventDefault();
+  var input = document.getElementById('addCmd');
+  var p = parseAddCmd(input.value);
+  if (p.error) return modMsg('addMsg', p.error, 'err');
+  var btn = document.getElementById('addSave'); btn.disabled = true;
+  modMsg('addMsg', 'Saving…');
+  try {
+    var nick = ensureNick();
+    if (p.kind === 'kill') await commitKill(p.level, p.ch, p.durationMs, nick);
+    else                   await commitSnapshot(p.level, p.ch, p.phase, nick);
+    modMsg('addMsg', 'Saved ✓', 'ok');
+    input.value = '';
+    setTimeout(closeModal, 500);
+  } catch (e) {
+    modMsg('addMsg', 'Error: ' + e.message, 'err');
+  }
   btn.disabled = false;
-  if (error) return modMsg('sMsg', 'Error: ' + error.message, 'err');
-  modMsg('sMsg', rounded >= 5 ? '🔥 Boss respawned ✓' : 'Phase ' + rounded + ' saved ✓', 'ok');
-  document.getElementById('sPh').value = '';
-  setTimeout(closeModal, 700);
-}
-document.getElementById('sSave').addEventListener('click', saveSnapshot);
-document.getElementById('sCancel').addEventListener('click', closeModal);
+});
 
-// ── EDIT / DELETE ────────────────────────────────────────────
-var editSelectedId = null;
+// ── Per-card action menu ─────────────────────────────────────
+var cardMenuEl = document.getElementById('cardMenu');
+var cardMenuId = null;
 
-function refreshEditList() {
-  var ul = document.getElementById('eList');
-  var ids = Object.keys(entries).sort();
-  if (!ids.length) { ul.innerHTML = '<div class="ed-item" style="cursor:default;color:var(--muted)">No entries yet</div>'; return; }
-  ul.innerHTML = ids.map(function(id){
-    var e = entries[id];
-    var src = id.indexOf('dc_') === 0 ? 'discord/web' : 'electron';
-    return '<div class="ed-item" data-id="'+esc(id)+'">'
-         +   '<span>LV'+esc(e.level)+' CH'+esc(e.channel)+'</span>'
-         +   '<span class="ed-meta">'+src+'</span>'
-         + '</div>';
-  }).join('');
-  ul.querySelectorAll('.ed-item').forEach(function(item){
-    if (!item.dataset.id) return;
-    item.addEventListener('click', function(){
-      editSelectedId = item.dataset.id;
-      ul.querySelectorAll('.ed-item').forEach(function(x){ x.classList.remove('sel'); });
-      item.classList.add('sel');
-      modMsg('eMsg', 'Selected: ' + editSelectedId);
-    });
-  });
+function openCardMenu(id, anchor) {
+  cardMenuId = id;
+  var rect = anchor.getBoundingClientRect();
+  cardMenuEl.style.display = 'flex';
+  // Position below the menu button, but flip up if it would go off-screen
+  var w = 220;
+  var left = Math.min(window.innerWidth - w - 8, Math.max(8, rect.right - w));
+  var top  = rect.bottom + 4;
+  if (top + 280 > window.innerHeight) top = Math.max(8, rect.top - 280);
+  cardMenuEl.style.left = left + 'px';
+  cardMenuEl.style.top  = top + 'px';
 }
 
-async function saveEdit() {
-  if (!editSelectedId) return modMsg('eMsg', 'Pick an entry first', 'err');
-  var dur = parseDuration(document.getElementById('eDur').value);
-  if (!dur) return modMsg('eMsg', 'Enter a new duration to save (or use Delete)', 'err');
+function closeCardMenu() {
+  cardMenuEl.style.display = 'none';
+  cardMenuId = null;
+}
+
+document.addEventListener('click', function(ev){
+  var btn = ev.target.closest('.js-menu');
+  if (btn) {
+    ev.stopPropagation();
+    if (cardMenuId === btn.dataset.id) { closeCardMenu(); return; }
+    openCardMenu(btn.dataset.id, btn);
+    return;
+  }
+  if (cardMenuEl.style.display !== 'none' && !cardMenuEl.contains(ev.target)) closeCardMenu();
+});
+
+cardMenuEl.addEventListener('click', async function(ev){
+  var b = ev.target.closest('button[data-act]');
+  if (!b || !cardMenuId) return;
+  var id = cardMenuId;
+  var act = b.dataset.act;
+  closeCardMenu();
+  await handleCardAction(act, id);
+});
+
+async function handleCardAction(act, id) {
+  var e = entries[id];
+  if (!e) return;
   var nick = ensureNick();
-  var now  = Date.now();
-  var btn  = document.getElementById('eSave'); btn.disabled = true;
-  modMsg('eMsg', 'Saving…');
-  var { error } = await sb.from('boss_entries').update({
-    kill_time: now, duration_ms: dur,
-    note: 'edit via web @' + nick, synced_at: now,
-  }).eq('id', editSelectedId);
-  btn.disabled = false;
-  if (error) return modMsg('eMsg', 'Error: ' + error.message, 'err');
-  modMsg('eMsg', 'Updated ✓', 'ok');
-  document.getElementById('eDur').value = '';
-  setTimeout(closeModal, 600);
+  var lv = parseInt(e.level, 10);
+  var ch = parseInt(e.channel, 10);
+  try {
+    if (act === 'respawn') {
+      await commitSnapshot(lv, ch, 5.0, nick);
+    } else if (act === 'snap') {
+      var s = prompt('Phase (1.0 – 5.0, or "on"):', '');
+      if (!s) return;
+      var p = parseValueOnly(s, lv, ch);
+      if (p.error || p.kind !== 'snap') return alert('Invalid phase: ' + (p.error || s));
+      await commitSnapshot(lv, ch, p.phase, nick);
+    } else if (act === 'time') {
+      var t = prompt('New time-to-P1 (1.20 = 1h 20m, 50 = 50 min, 1:30 = 1h 30m):', '');
+      if (!t) return;
+      var pt = parseValueOnly(t, lv, ch);
+      if (pt.error || pt.kind !== 'kill') return alert('Invalid time: ' + (pt.error || t));
+      var now = Date.now();
+      var { error } = await sb.from('boss_entries').update({
+        kill_time: now, duration_ms: pt.durationMs,
+        note: 'edit time via web @' + nick, synced_at: now,
+      }).eq('id', id);
+      if (error) alert('Error: ' + error.message);
+    } else if (act === 'ch') {
+      var c = prompt('New channel?', e.channel);
+      if (!c) return;
+      var newCh = parseInt(c, 10);
+      if (!newCh || String(newCh) === String(e.channel)) return;
+      await moveEntry(e, lv, newCh, nick);
+    } else if (act === 'lv') {
+      var l = prompt('New level?', e.level);
+      if (!l) return;
+      var newLv = parseInt(l, 10);
+      if (!newLv || String(newLv) === String(e.level)) return;
+      await moveEntry(e, newLv, ch, nick);
+    } else if (act === 'del') {
+      if (!confirm('Delete LV' + e.level + ' CH' + e.channel + '?')) return;
+      var { error: derr } = await sb.from('boss_entries').delete().eq('id', id);
+      if (derr) alert('Error: ' + derr.message);
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 }
 
-async function deleteEntry() {
-  if (!editSelectedId) return modMsg('eMsg', 'Pick an entry first', 'err');
-  if (!confirm('Delete ' + editSelectedId + '?')) return;
-  var btn = document.getElementById('eDel'); btn.disabled = true;
-  modMsg('eMsg', 'Deleting…');
-  var { error } = await sb.from('boss_entries').delete().eq('id', editSelectedId);
-  btn.disabled = false;
-  if (error) return modMsg('eMsg', 'Error: ' + error.message, 'err');
-  modMsg('eMsg', 'Deleted ✓', 'ok');
-  editSelectedId = null;
-  setTimeout(closeModal, 500);
+async function moveEntry(e, newLv, newCh, nick) {
+  var newId = entryId(newLv, newCh);
+  var now = Date.now();
+  var { error: ue } = await sb.from('boss_entries').upsert({
+    id: newId, level: String(newLv), channel: String(newCh),
+    kill_time: e.killTime || 0, duration_ms: e.durationMs || 0,
+    snapshots: e.snapshots || [], note: 'moved from LV' + e.level + ' CH' + e.channel + ' via web @' + nick,
+    created_at: e.createdAt || now, missing: !!e.missing, synced_at: now,
+  });
+  if (ue) return alert('Error: ' + ue.message);
+  if (newId !== e.id) {
+    var { error: de } = await sb.from('boss_entries').delete().eq('id', e.id);
+    if (de) alert('Move done but old delete failed: ' + de.message);
+  }
 }
 
-document.getElementById('eSave').addEventListener('click', saveEdit);
-document.getElementById('eDel').addEventListener('click', deleteEntry);
-document.getElementById('eCancel').addEventListener('click', closeModal);
+// ── Persisted phase samples (survives kill cycles) ───────────
+var SAMPLE_KEY = 'tos_phase_samples_v1';
+var persistedSamples = {};   // { 'lv145': [{spd, ts, seg, w, hb}, ...] }
+try {
+  var raw = localStorage.getItem(SAMPLE_KEY);
+  if (raw) persistedSamples = JSON.parse(raw) || {};
+} catch (_) { persistedSamples = {}; }
+
+function savePersisted() {
+  try { localStorage.setItem(SAMPLE_KEY, JSON.stringify(persistedSamples)); } catch (_) {}
+}
+
+function persistLatestSample(level, snaps) {
+  if (snaps.length < 2) return;
+  var a = snaps[snaps.length - 2], b = snaps[snaps.length - 1];
+  var dt = b.time - a.time, dp = b.phase - a.phase;
+  if (dt < 120000 || dp <= 0) return;
+  var key = 'lv' + level;
+  if (!persistedSamples[key]) persistedSamples[key] = [];
+  // Dedupe — UPDATE events on unrelated fields would otherwise re-add the same pair
+  var arr = persistedSamples[key];
+  for (var i = arr.length - 1; i >= Math.max(0, arr.length - 8); i--) {
+    if (arr[i].ts === b.time) return;
+  }
+  arr.push({
+    spd: dp / dt, ts: b.time,
+    seg: Math.floor(a.phase) === Math.floor(b.phase) ? Math.floor(a.phase) : 0,
+    w: 2, hb: hourBucket(b.time),
+  });
+  if (arr.length > 200) persistedSamples[key] = arr.slice(-200);
+  savePersisted();
+}
 
 // Boot
 loadAll();
