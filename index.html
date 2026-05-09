@@ -55,9 +55,8 @@ header{position:sticky;top:0;z-index:100;background:rgba(9,9,15,.97);border-bott
 .fb{font-family:var(--body);font-size:12px;font-weight:600;letter-spacing:.5px;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
 .fb:hover{border-color:var(--border2);color:var(--text)}
 .fb.on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
-.fb[data-f="soon"].on{background:#d4a04018;border-color:var(--col-soon);color:var(--col-soon)}
 .fb[data-f="p1"].on{background:#6ecf9518;border-color:var(--col-p1);color:var(--col-p1)}
-.fb[data-f="late"].on{background:#d4586818;border-color:var(--col-late);color:var(--col-late)}
+.fb[data-f="spawn"].on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
 .fbc{font-size:10px;opacity:.65}
 .srch{margin-left:auto;background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:4px 14px;font-family:var(--mono);font-size:12px;width:180px;outline:none}
 .srch:focus{border-color:var(--gold)}
@@ -186,9 +185,8 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   <div class="bar">
     <button class="fb on" data-f="ALL">All <span class="fbc" id="fc-ALL"></span></button>
     <button class="fb" data-f="wait">Waiting <span class="fbc" id="fc-wait"></span></button>
-    <button class="fb" data-f="soon">Soon <span class="fbc" id="fc-soon"></span></button>
-    <button class="fb" data-f="p1">P1 Active <span class="fbc" id="fc-p1"></span></button>
-    <button class="fb" data-f="late">Late <span class="fbc" id="fc-late"></span></button>
+    <button class="fb" data-f="p1">Phase 1-4 <span class="fbc" id="fc-p1"></span></button>
+    <button class="fb" data-f="spawn">🔥 Boss Respawn <span class="fbc" id="fc-spawn"></span></button>
     <button class="ins-btn" id="sortBtn" title="Toggle sort">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
@@ -702,7 +700,14 @@ function tick1(card, e, now) {
 // ── Sort ──────────────────────────────────────────────────────
 function sortScore(e, now) {
   var st = getState(e, now);
-  if (st.s === 'spawn') return -1000000;     // pin spawned bosses to top
+  if (st.s === 'spawn') {
+    // Newer spawn = higher urgency = top. -1e10 ensures spawn beats any other state.
+    var spawnAt = 0, snaps = e.snapshots || [];
+    for (var i = 0; i < snaps.length; i++) {
+      if (snaps[i].phase >= 5) { spawnAt = snaps[i].time; break; }
+    }
+    return -1e10 - spawnAt;
+  }
   if (st.rem !== null && st.rem > 0) return st.rem;
   if (e.killTime && e.durationMs) return (e.killTime + e.durationMs) - now + 1000000;
   return 9999999999;
@@ -729,17 +734,26 @@ function renderAll() {
   var counts = { ALL:0, wait:0, soon:0, p1:0, late:0, miss:0, spawn:0 };
   list.forEach(function(e){ counts.ALL++; var s=getState(e,now).s; counts[s]=(counts[s]||0)+1; });
 
-  ['ALL','wait','soon','p1','late'].forEach(function(k){
+  // Filter buckets: wait = wait+soon, p1 = p1+late, spawn = spawn
+  var bucketCount = {
+    ALL:   counts.ALL,
+    wait:  counts.wait + counts.soon,
+    p1:    counts.p1   + counts.late,
+    spawn: counts.spawn,
+  };
+  ['ALL','wait','p1','spawn'].forEach(function(k){
     var el = document.getElementById('fc-'+k);
-    var n  = counts[k] + (k === 'late' ? counts.spawn : 0);   // spawn rolls into late
-    if (el) el.textContent = n > 0 ? '('+n+')' : '';
+    if (el) el.textContent = bucketCount[k] > 0 ? '('+bucketCount[k]+')' : '';
   });
   document.getElementById('countLbl').textContent = counts.ALL + ' tracked';
 
   var inc = {};
   var filtered = list.filter(function(e){
     var s = getState(e,now).s;
-    var fok = filt === 'ALL' || filt === s || (filt === 'late' && s === 'spawn');
+    var fok = filt === 'ALL'
+           || (filt === 'wait'  && (s === 'wait' || s === 'soon'))
+           || (filt === 'p1'    && (s === 'p1'   || s === 'late'))
+           || (filt === 'spawn' &&  s === 'spawn');
     var sq  = ((e.level||'')+(e.channel||'')).toLowerCase();
     var ok  = fok && (!qry || sq.indexOf(qry) !== -1);
     if (ok) inc[e.id] = true;
