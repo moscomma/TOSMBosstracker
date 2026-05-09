@@ -266,7 +266,11 @@ function rowToEntry(row) {
 
 // ── State computation (mirrors getState in the Electron app) ──
 function getState(e, now) {
-  if (!e.killTime || !e.durationMs) return { s: e.missing ? 'miss' : 'wait', rem: null, pct: 0 };
+  if (!e.killTime || !e.durationMs) {
+    if (e.missing) return { s: 'miss', rem: null, pct: 0 };
+    if (e.snapshots && e.snapshots.length > 0) return { s: 'p1', rem: null, pct: 1 };
+    return { s: 'wait', rem: null, pct: 0 };
+  }
   var elapsed = now - e.killTime;
   var rem     = e.durationMs - elapsed;
   var pct     = Math.min(1, elapsed / e.durationMs);
@@ -393,8 +397,11 @@ function tick1(card, e, now) {
     var phStr = ph !== null ? phaseName(ph) : 'P1 Active';
     var phCol = ph !== null ? phaseColor(ph) : 'var(--col-p1)';
     if (cdNum) { cdNum.textContent = phStr; cdNum.style.color = phCol; cdNum.style.fontSize = '36px'; }
-    var sinceP1Ms = now - (e.killTime + e.durationMs);
-    if (cdLbl) cdLbl.textContent = fmtOver(sinceP1Ms) + ' since P1';
+    if (e.killTime && e.durationMs) {
+      if (cdLbl) cdLbl.textContent = fmtOver(now - (e.killTime + e.durationMs)) + ' since P1';
+    } else {
+      if (cdLbl) cdLbl.textContent = 'last snapshot · no kill timer';
+    }
   } else if (!e.killTime) {
     if (hasSnap) {
       if (cdBarWrap) cdBarWrap.classList.add('hidden');
