@@ -205,16 +205,21 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .mod-btn:disabled{opacity:.5;cursor:wait}
 .mod-hint code{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-family:var(--mono);font-size:10px;color:var(--col-p1)}
 
-/* ── Per-card action menu ── */
+/* ── Per-card inline edit / actions ── */
 .card{position:relative}
-.card-menu-btn{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);font-size:18px;font-weight:700;cursor:pointer;padding:0 8px;line-height:1;border-radius:4px;z-index:5;transition:all .15s}
-.card-menu-btn:hover{background:var(--muted2);color:var(--text)}
-.card-menu{position:fixed;background:var(--panel);border:1px solid var(--border2);border-radius:8px;padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.6);z-index:300;min-width:220px;flex-direction:column;display:flex;animation:popIn .14s ease}
-.card-menu button{font-family:var(--body);font-size:12px;font-weight:500;text-align:left;padding:8px 12px;background:none;border:none;color:var(--text);cursor:pointer;border-radius:6px;letter-spacing:.3px}
-.card-menu button:hover{background:var(--bg2)}
-.card-menu button.danger{color:var(--col-late)}
-.card-menu button.danger:hover{background:#d4586818}
-.card-menu .sep{border-top:1px solid var(--border);margin:4px 0}
+.card .ch{padding-right:24px}
+.card-x{position:absolute;top:6px;right:6px;width:22px;height:22px;background:none;border:none;color:var(--muted);font-size:18px;font-weight:700;cursor:pointer;line-height:1;border-radius:50%;z-index:5;transition:all .15s;display:flex;align-items:center;justify-content:center}
+.card-x:hover{background:var(--col-late);color:#fff}
+.chip-edit{cursor:pointer;font:inherit;letter-spacing:inherit;transition:all .15s;outline:none}
+.chip-edit:hover{border-color:var(--col-p1);box-shadow:0 0 8px #6ecf9533}
+.chip-edit:focus{border-color:var(--col-p1)}
+.cd-num.js-edittime{cursor:pointer;border-radius:6px;padding:0 4px;transition:background .15s}
+.cd-num.js-edittime:hover{background:var(--bg2)}
+.card-acts{display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+.card-act{flex:1;font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:.5px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--soft);cursor:pointer;transition:all .15s}
+.card-act:hover{border-color:var(--col-p1);color:var(--col-p1)}
+.card-act.respawn{color:var(--gold);border-color:#3a2c0e}
+.card-act.respawn:hover{background:#c9a84c18;border-color:var(--gold);box-shadow:0 0 10px #c9a84c44}
 </style>
 </head>
 <body>
@@ -243,7 +248,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="fb" data-f="wait">Waiting <span class="fbc" id="fc-wait"></span></button>
     <button class="fb" data-f="p1">P1-4 <span class="fbc" id="fc-p1"></span></button>
     <button class="fb" data-f="spawn">🔥 Boss Respawn <span class="fbc" id="fc-spawn"></span></button>
-    <button class="ins-btn" id="sortBtn" title="Toggle sort">⇅ Soonest</button>
+    <button class="ins-btn" id="sortBtn" title="Toggle sort (Stable / Soonest / Channel)">📌 Stable</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
     <button class="add-btn" id="addBtn" title="Add or edit boss data">+ Add</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
@@ -289,15 +294,6 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   </form>
 </div>
 
-<!-- Card action menu (per-card popup) -->
-<div class="card-menu" id="cardMenu" style="display:none">
-  <button data-act="respawn">🔥 Boss respawned (5.0)</button>
-  <button data-act="snap">+ Add phase snapshot</button>
-  <button data-act="time">⏱ Edit time / countdown</button>
-  <button data-act="ch"># Edit channel</button>
-  <button data-act="lv">L Edit level</button>
-  <button class="danger" data-act="del">🗑 Delete entry</button>
-</div>
 
 <!--
   CONFIGURATION — fill in your Supabase project URL and anon key.
@@ -321,7 +317,7 @@ var prevStates = {};
 var soundOn    = true;
 var audioCtx   = null;
 var insOpen    = false;
-var sortBy     = 'soonest';   // 'soonest' | 'channel'
+var sortBy     = 'stable';    // 'stable' | 'soonest' | 'channel' — stable preserves order so new entries don't reshuffle existing ones
 var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
 var volume     = 0.5;
 var prevPhases = {};   // { entryId: lastEstimatedPhase } — for phase-4 alert
@@ -512,16 +508,16 @@ function levelIsActive(es, now) {
 function cardHTML(e) {
   var st = getState(e, Date.now());
   return [
-    '<button class="card-menu-btn js-menu" data-id="'+esc(e.id)+'" title="Edit / Delete">⋯</button>',
+    '<button class="card-x js-del" data-id="'+esc(e.id)+'" title="Delete entry">×</button>',
     '<div class="ch">',
       '<div class="chips">',
-        '<div class="chip"><span class="cl">LV</span><span class="cv">'+esc(e.level||'?')+'</span></div>',
-        '<div class="chip"><span class="cl">CH</span><span class="cv">'+esc(e.channel||'?')+'</span></div>',
+        '<button class="chip chip-edit js-editlv" data-id="'+esc(e.id)+'" title="Click to edit level"><span class="cl">LV</span><span class="cv">'+esc(e.level||'?')+'</span></button>',
+        '<button class="chip chip-edit js-editch" data-id="'+esc(e.id)+'" title="Click to edit channel"><span class="cl">CH</span><span class="cv">'+esc(e.channel||'?')+'</span></button>',
       '</div>',
       '<span class="state-badge '+S_BADGE[st.s]+'">'+S_LABEL[st.s]+'</span>',
     '</div>',
     '<div class="cd-wrap">',
-      '<div class="cd-num js-cdnum" style="color:var(--muted)">--:--</div>',
+      '<div class="cd-num js-cdnum js-edittime" data-id="'+esc(e.id)+'" title="Click to edit time" style="color:var(--muted)">--:--</div>',
       '<div class="cd-lbl js-cdlbl"></div>',
       '<div class="cd-bar-wrap"><div class="cd-bar js-cdbar" style="width:0%"></div></div>',
     '</div>',
@@ -541,6 +537,10 @@ function cardHTML(e) {
       '<div class="ph-snap-list js-phlist"></div>',
     '</div>',
     e.note ? '<div class="note-row">'+esc(e.note)+'</div>' : '',
+    '<div class="card-acts">',
+      '<button class="card-act js-snap" data-id="'+esc(e.id)+'" title="Add a phase snapshot">+P Snapshot</button>',
+      '<button class="card-act respawn js-respawn" data-id="'+esc(e.id)+'" title="Mark boss as respawned">🔥 Respawn</button>',
+    '</div>',
   ].join('');
 }
 
@@ -853,11 +853,16 @@ function sortByPhaseDesc(now) {
     return sortByChannel(a, b);             // tiebreak on level/channel
   };
 }
+function sortByCreated(a, b) {
+  // Older entries first; new entries always append to the bottom (no reshuffle)
+  return (a.createdAt || 0) - (b.createdAt || 0);
+}
 function applySort(list, now) {
   // P1-4 filter always sorts by phase descending (4 → 3 → 2 → 1)
   if (filt === 'p1')             list.sort(sortByPhaseDesc(now));
   else if (sortBy === 'channel') list.sort(sortByChannel);
-  else                           list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
+  else if (sortBy === 'soonest') list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
+  else                           list.sort(sortByCreated);
 }
 
 // ── Render ────────────────────────────────────────────────────
@@ -1066,10 +1071,13 @@ document.querySelectorAll('.fb').forEach(function(btn){
 document.getElementById('srch').addEventListener('input', function(){
   qry = this.value.trim().toLowerCase(); renderAll();
 });
+var SORT_LABELS = { stable: '📌 Stable', soonest: '⇅ Soonest', channel: '⇅ Channel' };
+var SORT_ORDER  = ['stable', 'soonest', 'channel'];
 document.getElementById('sortBtn').addEventListener('click', function(){
-  sortBy = sortBy === 'soonest' ? 'channel' : 'soonest';
-  this.textContent = sortBy === 'soonest' ? '⇅ Soonest' : '⇅ Channel';
-  this.classList.toggle('on', sortBy === 'channel');
+  var i = SORT_ORDER.indexOf(sortBy);
+  sortBy = SORT_ORDER[(i + 1) % SORT_ORDER.length];
+  this.textContent = SORT_LABELS[sortBy];
+  this.classList.toggle('on', sortBy !== 'stable');
   renderAll();
 });
 
@@ -1259,46 +1267,21 @@ document.getElementById('addForm').addEventListener('submit', async function(ev)
   btn.disabled = false;
 });
 
-// ── Per-card action menu ─────────────────────────────────────
-var cardMenuEl = document.getElementById('cardMenu');
-var cardMenuId = null;
+// ── Per-card inline edit / actions ───────────────────────────
+function closeCardMenu(){}   // legacy no-op (kept for ESC handler)
 
-function openCardMenu(id, anchor) {
-  cardMenuId = id;
-  var rect = anchor.getBoundingClientRect();
-  cardMenuEl.style.display = 'flex';
-  // Position below the menu button, but flip up if it would go off-screen
-  var w = 220;
-  var left = Math.min(window.innerWidth - w - 8, Math.max(8, rect.right - w));
-  var top  = rect.bottom + 4;
-  if (top + 280 > window.innerHeight) top = Math.max(8, rect.top - 280);
-  cardMenuEl.style.left = left + 'px';
-  cardMenuEl.style.top  = top + 'px';
-}
-
-function closeCardMenu() {
-  cardMenuEl.style.display = 'none';
-  cardMenuId = null;
-}
-
-document.addEventListener('click', function(ev){
-  var btn = ev.target.closest('.js-menu');
-  if (btn) {
-    ev.stopPropagation();
-    if (cardMenuId === btn.dataset.id) { closeCardMenu(); return; }
-    openCardMenu(btn.dataset.id, btn);
-    return;
-  }
-  if (cardMenuEl.style.display !== 'none' && !cardMenuEl.contains(ev.target)) closeCardMenu();
-});
-
-cardMenuEl.addEventListener('click', async function(ev){
-  var b = ev.target.closest('button[data-act]');
-  if (!b || !cardMenuId) return;
-  var id = cardMenuId;
-  var act = b.dataset.act;
-  closeCardMenu();
-  await handleCardAction(act, id);
+document.getElementById('grid').addEventListener('click', async function(ev){
+  var t = ev.target;
+  var btn = t.closest('[data-id]');
+  if (!btn) return;
+  ev.stopPropagation();
+  var id = btn.dataset.id;
+  if      (t.closest('.js-del'))      await handleCardAction('del',     id);
+  else if (t.closest('.js-respawn'))  await handleCardAction('respawn', id);
+  else if (t.closest('.js-snap'))     await handleCardAction('snap',    id);
+  else if (t.closest('.js-edittime')) await handleCardAction('time',    id);
+  else if (t.closest('.js-editch'))   await handleCardAction('ch',      id);
+  else if (t.closest('.js-editlv'))   await handleCardAction('lv',      id);
 });
 
 async function handleCardAction(act, id) {
