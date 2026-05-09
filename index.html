@@ -185,7 +185,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   <div class="bar">
     <button class="fb on" data-f="ALL">All <span class="fbc" id="fc-ALL"></span></button>
     <button class="fb" data-f="wait">Waiting <span class="fbc" id="fc-wait"></span></button>
-    <button class="fb" data-f="p1">Phase 1-4 <span class="fbc" id="fc-p1"></span></button>
+    <button class="fb" data-f="p1">P1-4 <span class="fbc" id="fc-p1"></span></button>
     <button class="fb" data-f="spawn">🔥 Boss Respawn <span class="fbc" id="fc-spawn"></span></button>
     <button class="ins-btn" id="sortBtn" title="Toggle sort">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
@@ -718,9 +718,19 @@ function sortByChannel(a, b) {
   var chA = parseInt(a.channel) || 0, chB = parseInt(b.channel) || 0;
   return chA - chB;
 }
+function sortByPhaseDesc(now) {
+  return function(a, b) {
+    var pa = estimatePhase(a, now); if (pa === null) pa = 0;
+    var pb = estimatePhase(b, now); if (pb === null) pb = 0;
+    if (pb !== pa) return pb - pa;          // higher phase first
+    return sortByChannel(a, b);             // tiebreak on level/channel
+  };
+}
 function applySort(list, now) {
-  if (sortBy === 'channel') list.sort(sortByChannel);
-  else                      list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
+  // P1-4 filter always sorts by phase descending (4 → 3 → 2 → 1)
+  if (filt === 'p1')             list.sort(sortByPhaseDesc(now));
+  else if (sortBy === 'channel') list.sort(sortByChannel);
+  else                           list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
 }
 
 // ── Render ────────────────────────────────────────────────────
