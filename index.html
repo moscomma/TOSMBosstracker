@@ -248,7 +248,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="fb" data-f="wait">Waiting <span class="fbc" id="fc-wait"></span></button>
     <button class="fb" data-f="p1">P1-4 <span class="fbc" id="fc-p1"></span></button>
     <button class="fb" data-f="spawn">🔥 Boss Respawn <span class="fbc" id="fc-spawn"></span></button>
-    <button class="ins-btn" id="sortBtn" title="Toggle sort (Stable / Soonest / Channel)">📌 Stable</button>
+    <button class="ins-btn" id="sortBtn" title="Toggle sort (Soonest / Channel / Stable)">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
     <button class="add-btn" id="addBtn" title="Add or edit boss data">+ Add</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
@@ -317,7 +317,7 @@ var prevStates = {};
 var soundOn    = true;
 var audioCtx   = null;
 var insOpen    = false;
-var sortBy     = 'stable';    // 'stable' | 'soonest' | 'channel' — stable preserves order so new entries don't reshuffle existing ones
+var sortBy     = 'soonest';   // 'soonest' | 'channel' | 'stable' — default is most-urgent first
 var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
 var volume     = 0.5;
 var prevPhases = {};   // { entryId: lastEstimatedPhase } — for phase-4 alert
@@ -421,14 +421,16 @@ function rowToEntry(row) {
 }
 
 // ── State computation (mirrors getState in the Electron app) ──
+// Rule: the moment we have a snapshot, the boss is "in phase mode" — the
+// countdown is no longer the primary information. So a snapshot toggles
+// state to p1/spawn regardless of how much time is left on the countdown.
 function getState(e, now) {
-  // Boss respawn confirmed: any snapshot at phase 5.0+
   if (e.snapshots && e.snapshots.length > 0) {
     if (e.snapshots[e.snapshots.length - 1].phase >= 5) return { s: 'spawn', rem: null, pct: 1 };
+    return { s: 'p1', rem: null, pct: 1 };
   }
   if (!e.killTime || !e.durationMs) {
     if (e.missing) return { s: 'miss', rem: null, pct: 0 };
-    if (e.snapshots && e.snapshots.length > 0) return { s: 'p1', rem: null, pct: 1 };
     return { s: 'wait', rem: null, pct: 0 };
   }
   var elapsed = now - e.killTime;
@@ -828,12 +830,18 @@ function tick1(card, e, now) {
 function sortScore(e, now) {
   var st = getState(e, now);
   if (st.s === 'spawn') {
-    // Newer spawn = higher urgency = top. -1e10 ensures spawn beats any other state.
     var spawnAt = 0, snaps = e.snapshots || [];
     for (var i = 0; i < snaps.length; i++) {
       if (snaps[i].phase >= 5) { spawnAt = snaps[i].time; break; }
     }
     return -1e10 - spawnAt;
+  }
+  // For snapshot-bearing entries, sort by estimated time-to-respawn. This
+  // puts a snapshot at phase 4.5 (a few min from spawn) above a fresh
+  // snapshot at phase 1.5, even if neither has a kill timer set.
+  if (e.snapshots && e.snapshots.length > 0) {
+    var sp = getSpawnAt(e);
+    if (sp) return sp - now;
   }
   if (st.rem !== null && st.rem > 0) return st.rem;
   if (e.killTime && e.durationMs) return (e.killTime + e.durationMs) - now + 1000000;
@@ -1071,13 +1079,13 @@ document.querySelectorAll('.fb').forEach(function(btn){
 document.getElementById('srch').addEventListener('input', function(){
   qry = this.value.trim().toLowerCase(); renderAll();
 });
-var SORT_LABELS = { stable: '📌 Stable', soonest: '⇅ Soonest', channel: '⇅ Channel' };
-var SORT_ORDER  = ['stable', 'soonest', 'channel'];
+var SORT_LABELS = { soonest: '⇅ Soonest', channel: '⇅ Channel', stable: '📌 Stable' };
+var SORT_ORDER  = ['soonest', 'channel', 'stable'];
 document.getElementById('sortBtn').addEventListener('click', function(){
   var i = SORT_ORDER.indexOf(sortBy);
   sortBy = SORT_ORDER[(i + 1) % SORT_ORDER.length];
   this.textContent = SORT_LABELS[sortBy];
-  this.classList.toggle('on', sortBy !== 'stable');
+  this.classList.toggle('on', sortBy !== 'soonest');
   renderAll();
 });
 
