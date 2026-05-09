@@ -836,6 +836,7 @@ function tick1(card, e, now) {
 // ── Sort ──────────────────────────────────────────────────────
 function sortScore(e, now) {
   var st = getState(e, now);
+  // 1) Spawned bosses always at the very top, newest spawn first
   if (st.s === 'spawn') {
     var spawnAt = 0, snaps = e.snapshots || [];
     for (var i = 0; i < snaps.length; i++) {
@@ -843,15 +844,19 @@ function sortScore(e, now) {
     }
     return -1e10 - spawnAt;
   }
-  // For snapshot-bearing entries, sort by estimated time-to-respawn. This
-  // puts a snapshot at phase 4.5 (a few min from spawn) above a fresh
-  // snapshot at phase 1.5, even if neither has a kill timer set.
-  if (e.snapshots && e.snapshots.length > 0) {
-    var sp = getSpawnAt(e);
-    if (sp) return sp - now;
+  // 2) In-phase entries (snapshot present, or past-P1 estimated): cluster
+  //    by phase tier descending — 4.x → 3.x → 2.x → 1.x, with the higher
+  //    sub-phase first inside each tier (4.9 above 4.1). Score is in the
+  //    range roughly [-5M..-1M] so always sorts above any countdown entry.
+  var ph = estimatePhase(e, now);
+  if (ph !== null && ph >= 1 && ph < 5) {
+    return -ph * 1000000;
   }
+  // 3) Countdown entries: soonest P1 first
   if (st.rem !== null && st.rem > 0) return st.rem;
+  // 4) Past-P1 fallback (rare — should be covered by step 2)
   if (e.killTime && e.durationMs) return (e.killTime + e.durationMs) - now + 1000000;
+  // 5) Empty / waiting / missing — bottom
   return 9999999999;
 }
 function sortByChannel(a, b) {
