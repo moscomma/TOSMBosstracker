@@ -81,6 +81,10 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 @keyframes glowLate{0%,100%{box-shadow:0 0 14px #d4586833}50%{box-shadow:0 0 32px #d4586866}}
 .card[data-s="miss"]{border-color:#333355;opacity:.65;background:repeating-linear-gradient(-45deg,#0e0f18 0px,#0e0f18 8px,#111320 8px,#111320 16px) !important}
 .card[data-s="miss"]::before{background:linear-gradient(90deg,transparent,#444466,transparent) !important}
+.card[data-s="spawn"]{border-color:#c9a84c88;background:linear-gradient(145deg,#1a1408 0%,var(--panel) 55%);animation:cardIn .26s ease,glowSpawn 1.6s ease-in-out infinite}
+.card[data-s="spawn"]::before{background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.card[data-s="spawn"] .chip{border-color:#c9a84c66}
+@keyframes glowSpawn{0%,100%{box-shadow:0 0 18px #c9a84c55}50%{box-shadow:0 0 38px #c9a84caa}}
 
 /* card header row */
 .ch{display:flex;align-items:center;gap:8px;margin-bottom:12px}
@@ -97,6 +101,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .badge-p1{color:var(--col-p1);border-color:#183328}
 .badge-late{color:var(--col-late);border-color:#3a1218}
 .badge-miss{color:#666688;border-color:#333355}
+.badge-spawn{color:var(--gold);border-color:#c9a84c66}
 
 /* countdown */
 .cd-wrap{text-align:center;padding:10px 0 8px}
@@ -253,6 +258,8 @@ function checkTransition(id, newState) {
     beep([[660,0,.18,.25],[660,.25,.18,.25]]);
   } else if (newState === 'p1') {
     beep([[880,0,.12,.4],[1047,.18,.14,.4],[1319,.36,.18,.5]]);
+  } else if (newState === 'spawn') {
+    beep([[523,0,.1,.5],[659,.12,.1,.5],[784,.24,.1,.5],[1047,.36,.3,.6]]);
   }
 }
 
@@ -290,6 +297,10 @@ function rowToEntry(row) {
 
 // ── State computation (mirrors getState in the Electron app) ──
 function getState(e, now) {
+  // Boss respawn confirmed: any snapshot at phase 5.0+
+  if (e.snapshots && e.snapshots.length > 0) {
+    if (e.snapshots[e.snapshots.length - 1].phase >= 5) return { s: 'spawn', rem: null, pct: 1 };
+  }
   if (!e.killTime || !e.durationMs) {
     if (e.missing) return { s: 'miss', rem: null, pct: 0 };
     if (e.snapshots && e.snapshots.length > 0) return { s: 'p1', rem: null, pct: 1 };
@@ -322,8 +333,8 @@ function fmtOver(ms) {
 function hhmm(ts) { var d = new Date(ts); return pad(d.getHours())+':'+pad(d.getMinutes()); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-var S_LABEL = { wait:'WAITING', soon:'SOON', p1:'P1 ACTIVE', late:'LATE', miss:'MISSING' };
-var S_BADGE = { wait:'badge-wait', soon:'badge-soon', p1:'badge-p1', late:'badge-late', miss:'badge-miss' };
+var S_LABEL = { wait:'WAITING', soon:'SOON', p1:'P1 ACTIVE', late:'LATE', miss:'MISSING', spawn:'RESPAWNED' };
+var S_BADGE = { wait:'badge-wait', soon:'badge-soon', p1:'badge-p1', late:'badge-late', miss:'badge-miss', spawn:'badge-spawn' };
 
 // ── Bangkok time buckets ──────────────────────────────────────
 // Thailand is UTC+7 (no DST). Buckets group hours by player activity.
@@ -383,15 +394,16 @@ function cardHTML(e) {
 
 // ── Phase helpers ─────────────────────────────────────────────
 function phaseColor(ph) {
-  if (ph < 2) return 'var(--col-p1)';
-  if (ph < 3) return '#4ea8de';
-  if (ph < 4) return 'var(--col-soon)';
+  if (ph >= 5) return 'var(--gold)';
+  if (ph < 2)  return 'var(--col-p1)';
+  if (ph < 3)  return '#4ea8de';
+  if (ph < 4)  return 'var(--col-soon)';
   return 'var(--col-late)';
 }
 function phaseName(ph) {
   if (!ph || ph < 1) return 'P1 Active';
-  var n = Math.floor(ph);
-  return n >= 5 ? 'Boss!' : 'Phase ' + n;
+  if (ph >= 5)       return '🔥 BOSS!';
+  return 'Phase ' + Math.floor(ph);
 }
 
 // ── Phase estimation (learning-aware) ─────────────────────────
@@ -558,10 +570,22 @@ function tick1(card, e, now) {
 
   var snaps    = e.snapshots || [];
   var hasSnap  = snaps.length > 0;
+  var isSpawn  = st.s === 'spawn';
   var isActive = st.s === 'p1' || st.s === 'late';
 
   // ── Countdown / Phase name display ────────────────────────────
-  if (isActive) {
+  if (isSpawn) {
+    if (cdBarWrap) cdBarWrap.classList.add('hidden');
+    if (cdNum) { cdNum.textContent = '🔥 BOSS!'; cdNum.style.color = 'var(--gold)'; cdNum.style.fontSize = '40px'; }
+    var spawnAt = 0;
+    for (var si = 0; si < snaps.length; si++) {
+      if (snaps[si].phase >= 5) { spawnAt = snaps[si].time; break; }
+    }
+    if (cdLbl) {
+      var sinceMs = spawnAt ? now - spawnAt : 0;
+      cdLbl.textContent = sinceMs < 60000 ? 'just spawned!' : 'spawned ' + Math.floor(sinceMs / 60000) + 'm ago';
+    }
+  } else if (isActive) {
     if (cdBarWrap) cdBarWrap.classList.add('hidden');
     var ph = estimatePhase(e, now);
     var phStr = ph !== null ? phaseName(ph) : 'P1 Active';
@@ -597,8 +621,8 @@ function tick1(card, e, now) {
     if (cdBar) { cdBar.style.width = Math.min(100, st.pct * 100).toFixed(1) + '%'; cdBar.style.background = col; }
   }
 
-  // ── Phase section — show when snapshots exist OR boss is active ──
-  var showPhase = hasSnap || isActive;
+  // ── Phase section — show when snapshots exist OR boss is active/spawned ──
+  var showPhase = hasSnap || isActive || isSpawn;
   if (phSec) phSec.classList.toggle('show', showPhase);
 
   if (showPhase) {
@@ -639,6 +663,7 @@ function tick1(card, e, now) {
 // ── Sort ──────────────────────────────────────────────────────
 function sortScore(e, now) {
   var st = getState(e, now);
+  if (st.s === 'spawn') return -1000000;     // pin spawned bosses to top
   if (st.rem !== null && st.rem > 0) return st.rem;
   if (e.killTime && e.durationMs) return (e.killTime + e.durationMs) - now + 1000000;
   return 9999999999;
