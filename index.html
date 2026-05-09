@@ -726,19 +726,20 @@ function renderAll() {
   var list  = Object.keys(entries).map(function(k){ return entries[k]; });
   applySort(list, now);
 
-  var counts = { ALL:0, wait:0, soon:0, p1:0, late:0, miss:0 };
+  var counts = { ALL:0, wait:0, soon:0, p1:0, late:0, miss:0, spawn:0 };
   list.forEach(function(e){ counts.ALL++; var s=getState(e,now).s; counts[s]=(counts[s]||0)+1; });
 
   ['ALL','wait','soon','p1','late'].forEach(function(k){
     var el = document.getElementById('fc-'+k);
-    if (el) el.textContent = counts[k] > 0 ? '('+counts[k]+')' : '';
+    var n  = counts[k] + (k === 'late' ? counts.spawn : 0);   // spawn rolls into late
+    if (el) el.textContent = n > 0 ? '('+n+')' : '';
   });
   document.getElementById('countLbl').textContent = counts.ALL + ' tracked';
 
   var inc = {};
   var filtered = list.filter(function(e){
     var s = getState(e,now).s;
-    var fok = filt === 'ALL' || filt === s;
+    var fok = filt === 'ALL' || filt === s || (filt === 'late' && s === 'spawn');
     var sq  = ((e.level||'')+(e.channel||'')).toLowerCase();
     var ok  = fok && (!qry || sq.indexOf(qry) !== -1);
     if (ok) inc[e.id] = true;
