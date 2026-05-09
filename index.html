@@ -46,6 +46,9 @@ header{position:sticky;top:0;z-index:100;background:rgba(9,9,15,.97);border-bott
 .snd-btn{font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:.5px;padding:3px 10px;border-radius:20px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
 .snd-btn:hover{border-color:var(--border2);color:var(--text)}
 .snd-btn.on{border-color:#c9a84c88;color:var(--gold);background:#c9a84c11}
+.vol-slider{width:70px;height:5px;background:var(--muted2);border-radius:3px;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none}
+.vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--gold);border-radius:50%;cursor:pointer;border:none;box-shadow:0 0 4px #c9a84c66}
+.vol-slider::-moz-range-thumb{width:13px;height:13px;background:var(--gold);border-radius:50%;cursor:pointer;border:none}
 
 /* ── FILTER BAR ── */
 .bar{max-width:1200px;margin:0 auto;padding:7px 24px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-top:1px solid var(--border)}
@@ -173,6 +176,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <div class="hdr-r">
       <span class="count-lbl" id="countLbl">— tracked</span>
       <button class="snd-btn on" id="sndBtn" title="Sound alerts">🔔 Sound</button>
+      <input type="range" id="volSlider" class="vol-slider" min="0" max="100" value="50" title="Volume"/>
       <div class="status-pill">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusLbl">CONNECTING</span>
@@ -228,6 +232,8 @@ var audioCtx   = null;
 var insOpen    = false;
 var sortBy     = 'soonest';   // 'soonest' | 'channel'
 var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
+var volume     = 0.5;
+var prevPhases = {};   // { entryId: lastEstimatedPhase } — for phase-4 alert
 
 // ── Sound ─────────────────────────────────────────────────────
 function getAudioCtx() {
@@ -235,10 +241,10 @@ function getAudioCtx() {
   return audioCtx;
 }
 function beep(notes) {
-  if (!soundOn) return;
+  if (!soundOn || volume <= 0) return;
   var ctx = getAudioCtx();
   notes.forEach(function(n) {
-    var freq = n[0], delay = n[1], dur = n[2], vol = n[3];
+    var freq = n[0], delay = n[1], dur = n[2], vol = n[3] * volume;
     var osc  = ctx.createOscillator();
     var gain = ctx.createGain();
     osc.connect(gain); gain.connect(ctx.destination);
@@ -250,17 +256,36 @@ function beep(notes) {
     osc.stop(ctx.currentTime + delay + dur + 0.05);
   });
 }
+
+// ── Sound library ─────────────────────────────────────────────
+var SOUND_SOON  = [[660,0,.18,.25],[660,.25,.18,.25]];
+var SOUND_P1    = [[880,0,.12,.4],[1047,.18,.14,.4],[1319,.36,.18,.5]];
+// Phase 4 alert — three rising tones, pleasant urgency (no harsh frequencies)
+var SOUND_P4    = [[880,0,.12,.35],[1047,.16,.12,.35],[1319,.32,.22,.45]];
+// Boss respawn fanfare — major triad arpeggio with octave doubling for richness
+var SOUND_SPAWN = [
+  [523,0,.16,.35],   [1047,0,.16,.18],
+  [659,.14,.16,.35], [1319,.14,.16,.18],
+  [784,.28,.2,.4],   [1568,.28,.2,.18],
+  [1047,.5,.4,.5],   [2093,.5,.4,.18]
+];
+
 function checkTransition(id, newState) {
   var prev = prevStates[id];
   prevStates[id] = newState;
   if (!prev || prev === newState) return;
-  if (newState === 'soon') {
-    beep([[660,0,.18,.25],[660,.25,.18,.25]]);
-  } else if (newState === 'p1') {
-    beep([[880,0,.12,.4],[1047,.18,.14,.4],[1319,.36,.18,.5]]);
-  } else if (newState === 'spawn') {
-    beep([[523,0,.1,.5],[659,.12,.1,.5],[784,.24,.1,.5],[1047,.36,.3,.6]]);
-  }
+  if      (newState === 'soon')  beep(SOUND_SOON);
+  else if (newState === 'p1')    beep(SOUND_P1);
+  else if (newState === 'spawn') beep(SOUND_SPAWN);
+}
+
+function checkPhaseAlert(id, currentPhase) {
+  if (currentPhase === null) return;
+  var prev = prevPhases[id];
+  prevPhases[id] = currentPhase;
+  if (prev === undefined) return;
+  // Crossing 4.0 (but not jumping straight to spawn) → P4 alert
+  if (prev < 4.0 && currentPhase >= 4.0 && currentPhase < 5.0) beep(SOUND_P4);
 }
 
 document.getElementById('sndBtn').addEventListener('click', function() {
@@ -279,6 +304,19 @@ function unlockAudio() {
 }
 document.addEventListener('click',   unlockAudio, true);
 document.addEventListener('keydown', unlockAudio, true);
+
+// Volume slider — persists across sessions
+(function initVolume(){
+  var slider = document.getElementById('volSlider');
+  try {
+    var saved = localStorage.getItem('tos_vol');
+    if (saved !== null) { slider.value = saved; volume = parseInt(saved) / 100; }
+  } catch(_){}
+  slider.addEventListener('input', function(){
+    volume = parseInt(this.value) / 100;
+    try { localStorage.setItem('tos_vol', this.value); } catch(_){}
+  });
+})();
 
 // ── DB row (snake_case) → entry (camelCase) ───────────────────
 function rowToEntry(row) {
@@ -553,6 +591,7 @@ function tick1(card, e, now) {
   var st = getState(e, now);
   card.dataset.s = st.s;
   checkTransition(e.id, st.s);
+  checkPhaseAlert(e.id, estimatePhase(e, now));
 
   var badge = card.querySelector('.state-badge');
   if (badge) { badge.className = 'state-badge ' + S_BADGE[st.s]; badge.textContent = S_LABEL[st.s]; }
