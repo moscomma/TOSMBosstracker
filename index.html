@@ -396,10 +396,17 @@ function tick1(card, e, now) {
     var sinceP1Ms = now - (e.killTime + e.durationMs);
     if (cdLbl) cdLbl.textContent = fmtOver(sinceP1Ms) + ' since P1';
   } else if (!e.killTime) {
-    if (cdBarWrap) cdBarWrap.classList.remove('hidden');
-    if (cdNum) { cdNum.textContent = '--:--'; cdNum.style.color = 'var(--muted)'; cdNum.style.fontSize = ''; }
-    if (cdLbl) cdLbl.textContent = e.missing ? 'marked missing' : 'awaiting kill data';
-    if (cdBar) { cdBar.style.width = '0%'; cdBar.style.background = 'var(--muted2)'; }
+    if (hasSnap) {
+      if (cdBarWrap) cdBarWrap.classList.add('hidden');
+      var lastPh = snaps[snaps.length - 1].phase;
+      if (cdNum) { cdNum.textContent = phaseName(lastPh); cdNum.style.color = phaseColor(lastPh); cdNum.style.fontSize = '36px'; }
+      if (cdLbl) cdLbl.textContent = 'last snapshot · no kill timer';
+    } else {
+      if (cdBarWrap) cdBarWrap.classList.remove('hidden');
+      if (cdNum) { cdNum.textContent = '--:--'; cdNum.style.color = 'var(--muted)'; cdNum.style.fontSize = ''; }
+      if (cdLbl) cdLbl.textContent = e.missing ? 'marked missing' : 'awaiting kill data';
+      if (cdBar) { cdBar.style.width = '0%'; cdBar.style.background = 'var(--muted2)'; }
+    }
   } else if (!e.durationMs) {
     if (cdBarWrap) cdBarWrap.classList.remove('hidden');
     if (cdNum) { cdNum.textContent = 'P1 Active'; cdNum.style.color = 'var(--col-p1)'; cdNum.style.fontSize = '36px'; }
