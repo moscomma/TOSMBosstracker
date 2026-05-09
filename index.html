@@ -149,6 +149,9 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .ins-segs{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
 .ins-seg{font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;color:var(--soft)}
 .ins-trail{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4;word-break:break-word}
+.ins-now{font-family:var(--mono);font-size:11px;color:var(--soft);font-weight:400;letter-spacing:0;margin-left:auto}
+.ins-close{margin-left:0 !important}
+.ins-bk{font-size:9px;color:var(--muted);margin-left:4px}
 </style>
 </head>
 <body>
@@ -186,6 +189,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   <div id="insPanel" class="ins-panel">
     <div class="ins-title">
       INSIGHTS
+      <span class="ins-now" id="insNow"></span>
       <button class="ins-close" id="insClose">✕</button>
     </div>
     <div class="ins-grid" id="insGrid"></div>
@@ -309,6 +313,26 @@ function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'
 var S_LABEL = { wait:'WAITING', soon:'SOON', p1:'P1 ACTIVE', late:'LATE', miss:'MISSING' };
 var S_BADGE = { wait:'badge-wait', soon:'badge-soon', p1:'badge-p1', late:'badge-late', miss:'badge-miss' };
 
+// ── Bangkok time buckets ──────────────────────────────────────
+// Thailand is UTC+7 (no DST). Buckets group hours by player activity.
+function bangkokMin(ts) {
+  var d = new Date(ts);
+  return (d.getUTCHours() * 60 + d.getUTCMinutes() + 7 * 60) % 1440;
+}
+function bangkokHour(ts) { return Math.floor(bangkokMin(ts) / 60); }
+function bangkokTimeStr(ts) {
+  var t = bangkokMin(ts);
+  return pad(Math.floor(t/60)) + ':' + pad(t%60);
+}
+function hourBucket(ts) {
+  var h = bangkokHour(ts);
+  if (h >= 18 && h < 23) return 'peak';
+  if (h >= 23 || h < 2)  return 'late';
+  if (h >= 2  && h < 8)  return 'sleep';
+  return 'day';
+}
+var BUCKET_LABEL = { peak: '🔥 peak', late: '🌃 late', sleep: '😴 sleep', day: '☀ day' };
+
 // ── Card HTML ─────────────────────────────────────────────────
 function cardHTML(e) {
   var st = getState(e, Date.now());
@@ -380,7 +404,7 @@ function rebuildKnowledge() {
       var seg  = (segA === segB) ? segA : 0;
       var ratio = spd / DEFAULT_PHASE_SPEED;
       var w = ratio > 1.2 ? 4 : ratio < 0.8 ? 1 : 2;
-      knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, w: w });
+      knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, w: w, hb: hourBucket(snaps[i].time) });
     }
   });
 }
@@ -401,13 +425,19 @@ function weightedTrimMean(samples, trimPct) {
   return totalW > 0 ? sum / totalW : null;
 }
 
-function getPhaseSpeed(level, segment) {
+function getPhaseSpeed(level, segment, atTime) {
   var raw = knowledge['lv' + level] || [];
   if (!raw.length) return DEFAULT_PHASE_SPEED;
   var now = Date.now();
-  var dec = raw.map(function(s){ return { spd: s.spd, w: s.w * decayWeight(s.ts, now), seg: s.seg }; });
-  var seg = dec.filter(function(s){ return s.seg === segment; });
-  if (seg.length >= 3) return weightedTrimMean(seg, 0.15) || DEFAULT_PHASE_SPEED;
+  var bucket = hourBucket(atTime || now);
+  var dec = raw.map(function(s){ return { spd: s.spd, w: s.w * decayWeight(s.ts, now), seg: s.seg, hb: s.hb }; });
+  // Cascade: bucket+segment → segment-only → bucket-only → level-global → default
+  var bs = dec.filter(function(s){ return s.seg === segment && s.hb === bucket; });
+  if (bs.length >= 3) return weightedTrimMean(bs, 0.15) || DEFAULT_PHASE_SPEED;
+  var sg = dec.filter(function(s){ return s.seg === segment; });
+  if (sg.length >= 3) return weightedTrimMean(sg, 0.15) || DEFAULT_PHASE_SPEED;
+  var bk = dec.filter(function(s){ return s.hb === bucket; });
+  if (bk.length >= 3) return weightedTrimMean(bk, 0.15) || DEFAULT_PHASE_SPEED;
   if (dec.length >= 3) return weightedTrimMean(dec, 0.15) || DEFAULT_PHASE_SPEED;
   return DEFAULT_PHASE_SPEED;
 }
@@ -425,7 +455,7 @@ function walkPhases(startPh, startT, untilT, level) {
   var phase = startPh, t = startT;
   while (phase < 5.0) {
     var segEnd = Math.min(5.0, Math.floor(phase) + 1);
-    var spd    = getPhaseSpeed(level, Math.floor(phase));
+    var spd    = getPhaseSpeed(level, Math.floor(phase), t);
     var dtSeg  = (segEnd - phase) / spd;
     if (untilT !== null && t + dtSeg > untilT) {
       phase += (untilT - t) * spd;
@@ -467,16 +497,20 @@ function getSpawnAt(e) {
 
 function getSpawnStddev(e) {
   var snaps = e.snapshots || [];
-  var phase = snaps.length ? snaps[snaps.length-1].phase : 1.0;
+  var phase, t;
+  if (snaps.length) { phase = snaps[snaps.length-1].phase; t = snaps[snaps.length-1].time; }
+  else if (e.killTime && e.durationMs) { phase = 1.0; t = e.killTime + e.durationMs; }
+  else { phase = 1.0; t = Date.now(); }
   var samples = knowledge['lv' + e.level] || [];
   var totalVar = 0;
   while (phase < 5.0) {
     var segEnd = Math.min(5.0, Math.floor(phase) + 1);
-    var spd    = getPhaseSpeed(e.level, Math.floor(phase));
+    var spd    = getPhaseSpeed(e.level, Math.floor(phase), t);
     var dt     = (segEnd - phase) / spd;
     var segN   = samples.filter(function(s){ return s.seg === Math.floor(phase); }).length;
     var cv     = segN >= 3 ? 0.20 : 0.40;
     totalVar  += Math.pow(dt * cv, 2);
+    t += dt;
     phase = segEnd;
   }
   return Math.sqrt(totalVar);
@@ -650,6 +684,7 @@ function renderAll() {
 }
 
 // ── Tick loop ─────────────────────────────────────────────────
+var _insTick = 0;
 function startTick() {
   clearInterval(tickIv);
   tickIv = setInterval(function(){
@@ -657,7 +692,7 @@ function startTick() {
     document.querySelectorAll('.card').forEach(function(card){
       var e = entries[card.dataset.id]; if (e) tick1(card, e, now);
     });
-    if (insOpen) renderInsights();
+    if (insOpen && (++_insTick % 3 === 0)) renderInsights();
   }, 1000);
 }
 
@@ -678,8 +713,11 @@ function fmtMinSec(ms) {
 
 function renderInsights() {
   var igrid = document.getElementById('insGrid');
+  var inow  = document.getElementById('insNow');
   if (!igrid) return;
   var now  = Date.now();
+  if (inow) inow.textContent = 'BKK ' + bangkokTimeStr(now) + ' · ' + BUCKET_LABEL[hourBucket(now)];
+
   var list = Object.keys(entries).map(function(k){ return entries[k]; });
   var active = list.filter(function(e){ return e.killTime || (e.snapshots && e.snapshots.length > 0); });
   active.sort(function(a, b){ return sortScore(a, now) - sortScore(b, now); });
@@ -700,29 +738,29 @@ function renderInsights() {
     var phLine    = phNow !== null ? phNow.toFixed(2) : '—';
     var spawnLine = '—';
     if (spawn) {
-      spawnLine = hhmm(spawn) + ' · ' + (spawn > now ? 'in ' + fmtMin(spawn - now) : fmtMin(now - spawn) + ' ago');
+      var bk = '<span class="ins-bk">' + BUCKET_LABEL[hourBucket(spawn)] + '</span>';
+      spawnLine = hhmm(spawn) + ' · ' + (spawn > now ? 'in ' + fmtMin(spawn - now) : fmtMin(now - spawn) + ' ago') + bk;
     }
     var sdLine = (sd && spawn) ? '± ' + fmtMinSec(sd) : '—';
 
     var rateLine = '—';
     if (rate) {
-      var ppm = rate * 60000;
-      rateLine = ppm.toFixed(2) + ' ph/min (' + (rate / DEFAULT_PHASE_SPEED).toFixed(2) + '× ref)';
+      rateLine = (rate * 60000).toFixed(2) + ' ph/min (' + (rate / DEFAULT_PHASE_SPEED).toFixed(2) + '× ref)';
     }
 
-    // Per-segment ETAs from current phase to 5.0
-    var segLines = [], walkPh = phNow !== null ? phNow : 1.0;
+    // Per-segment ETAs walking forward, each segment uses its own bucket
+    var segLines = [], walkPh = phNow !== null ? phNow : 1.0, walkT = now;
     while (walkPh < 5.0) {
       var segEnd = Math.min(5.0, Math.floor(walkPh) + 1);
-      var spd    = getPhaseSpeed(e.level, Math.floor(walkPh));
+      var spd    = getPhaseSpeed(e.level, Math.floor(walkPh), walkT);
       var dt     = (segEnd - walkPh) / spd;
       segLines.push('P' + Math.floor(walkPh) + ' ' + fmtMin(dt));
+      walkT += dt;
       walkPh = segEnd;
     }
 
     var trail = snaps.slice(-4).map(function(s){
-      var ago = Math.round((now - s.time)/60000);
-      return 'P' + s.phase.toFixed(1) + ' (' + ago + 'm ago)';
+      return 'P' + s.phase.toFixed(1) + ' (' + Math.round((now - s.time)/60000) + 'm ago)';
     }).join(' → ');
 
     return [
