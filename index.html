@@ -142,6 +142,13 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .ins-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
 .ins-btn:hover{border-color:var(--gold);color:var(--gold)}
 .ins-btn.on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
+.ins-card{min-width:220px}
+.conf-ad{color:var(--col-p1)}
+.conf-lr{color:var(--col-soon)}
+.conf-fb{color:var(--muted)}
+.ins-segs{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
+.ins-seg{font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;color:var(--soft)}
+.ins-trail{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4;word-break:break-word}
 </style>
 </head>
 <body>
@@ -209,6 +216,7 @@ var prevStates = {};
 var soundOn    = false;
 var audioCtx   = null;
 var insOpen    = false;
+var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
 
 // ── Sound ─────────────────────────────────────────────────────
 function getAudioCtx() {
@@ -350,20 +358,136 @@ function phaseName(ph) {
   return n >= 5 ? 'Boss!' : 'Phase ' + n;
 }
 
-// ── Phase estimation ──────────────────────────────────────────
-var DEFAULT_PHASE_SPEED = 3 / (90 * 60000); // 3 phases per 90 min (app default)
+// ── Phase estimation (learning-aware) ─────────────────────────
+var DEFAULT_PHASE_SPEED = 3 / (90 * 60000); // 3 phases per 90 min (cold-start fallback)
+
+// Build per-level speed samples from currently-active entry snapshots.
+function rebuildKnowledge() {
+  knowledge = {};
+  Object.keys(entries).forEach(function(k){
+    var e = entries[k];
+    if (!e.level || !e.snapshots || e.snapshots.length < 2) return;
+    var key = 'lv' + e.level;
+    if (!knowledge[key]) knowledge[key] = [];
+    var snaps = e.snapshots;
+    for (var i = 1; i < snaps.length; i++) {
+      var dt = snaps[i].time - snaps[i-1].time;
+      var dp = snaps[i].phase - snaps[i-1].phase;
+      if (dt < 120000 || dp <= 0) continue;
+      var spd = dp / dt;
+      var segA = Math.floor(snaps[i-1].phase);
+      var segB = Math.floor(snaps[i].phase);
+      var seg  = (segA === segB) ? segA : 0;
+      var ratio = spd / DEFAULT_PHASE_SPEED;
+      var w = ratio > 1.2 ? 4 : ratio < 0.8 ? 1 : 2;
+      knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, w: w });
+    }
+  });
+}
+
+function decayWeight(ts, now) {
+  var age = (now - ts) / 86400000;       // days
+  return Math.max(0.2, 1 - age * 0.05);  // 5%/day, floor 0.2
+}
+
+function weightedTrimMean(samples, trimPct) {
+  if (!samples.length) return null;
+  var sorted = samples.slice().sort(function(a,b){ return a.spd - b.spd; });
+  var trim = Math.floor(sorted.length * trimPct);
+  var kept = sorted.slice(trim, sorted.length - trim);
+  if (!kept.length) kept = sorted;
+  var totalW = 0, sum = 0;
+  kept.forEach(function(s){ totalW += s.w; sum += s.spd * s.w; });
+  return totalW > 0 ? sum / totalW : null;
+}
+
+function getPhaseSpeed(level, segment) {
+  var raw = knowledge['lv' + level] || [];
+  if (!raw.length) return DEFAULT_PHASE_SPEED;
+  var now = Date.now();
+  var dec = raw.map(function(s){ return { spd: s.spd, w: s.w * decayWeight(s.ts, now), seg: s.seg }; });
+  var seg = dec.filter(function(s){ return s.seg === segment; });
+  if (seg.length >= 3) return weightedTrimMean(seg, 0.15) || DEFAULT_PHASE_SPEED;
+  if (dec.length >= 3) return weightedTrimMean(dec, 0.15) || DEFAULT_PHASE_SPEED;
+  return DEFAULT_PHASE_SPEED;
+}
+
+function confidence(level) {
+  var n = (knowledge['lv' + level] || []).length;
+  if (n >= 8) return { label: '✦ adaptive', n: n, cls: 'conf-ad' };
+  if (n >= 3) return { label: '≈ learning', n: n, cls: 'conf-lr' };
+  return        { label: '· fallback',  n: n, cls: 'conf-fb' };
+}
+
+// Walk forward from (startPh, startT) using segment-specific speeds.
+// If untilT is given, stop when reaching it; else walk all the way to phase 5.0.
+function walkPhases(startPh, startT, untilT, level) {
+  var phase = startPh, t = startT;
+  while (phase < 5.0) {
+    var segEnd = Math.min(5.0, Math.floor(phase) + 1);
+    var spd    = getPhaseSpeed(level, Math.floor(phase));
+    var dtSeg  = (segEnd - phase) / spd;
+    if (untilT !== null && t + dtSeg > untilT) {
+      phase += (untilT - t) * spd;
+      return { phase: Math.min(5.0, phase), t: untilT };
+    }
+    t += dtSeg;
+    phase = segEnd;
+  }
+  return { phase: 5.0, t: t };
+}
 
 function estimatePhase(e, now) {
   var snaps = e.snapshots || [];
+  var seed;
   if (snaps.length > 0) {
     var last = snaps[snaps.length - 1];
-    return Math.min(5.0, last.phase + (now - last.time) * DEFAULT_PHASE_SPEED);
+    seed = { phase: last.phase, t: last.time };
+  } else if (e.killTime && e.durationMs && now >= e.killTime + e.durationMs) {
+    seed = { phase: 1.0, t: e.killTime + e.durationMs };
+  } else {
+    return null;
   }
-  // No snapshots — estimate from P1 start only if we have timing data
-  if (!e.killTime || !e.durationMs) return null;
-  var p1Start = e.killTime + e.durationMs;
-  if (now < p1Start) return null;
-  return Math.min(5.0, 1.0 + (now - p1Start) * DEFAULT_PHASE_SPEED);
+  return walkPhases(seed.phase, seed.t, now, e.level).phase;
+}
+
+function getSpawnAt(e) {
+  var snaps = e.snapshots || [];
+  var seed;
+  if (snaps.length > 0) {
+    var last = snaps[snaps.length - 1];
+    seed = { phase: last.phase, t: last.time };
+  } else if (e.killTime && e.durationMs) {
+    seed = { phase: 1.0, t: e.killTime + e.durationMs };
+  } else {
+    return null;
+  }
+  return walkPhases(seed.phase, seed.t, null, e.level).t;
+}
+
+function getSpawnStddev(e) {
+  var snaps = e.snapshots || [];
+  var phase = snaps.length ? snaps[snaps.length-1].phase : 1.0;
+  var samples = knowledge['lv' + e.level] || [];
+  var totalVar = 0;
+  while (phase < 5.0) {
+    var segEnd = Math.min(5.0, Math.floor(phase) + 1);
+    var spd    = getPhaseSpeed(e.level, Math.floor(phase));
+    var dt     = (segEnd - phase) / spd;
+    var segN   = samples.filter(function(s){ return s.seg === Math.floor(phase); }).length;
+    var cv     = segN >= 3 ? 0.20 : 0.40;
+    totalVar  += Math.pow(dt * cv, 2);
+    phase = segEnd;
+  }
+  return Math.sqrt(totalVar);
+}
+
+function getEntryRate(e) {
+  var snaps = e.snapshots || [];
+  if (snaps.length < 2) return null;
+  var dp = snaps[snaps.length-1].phase - snaps[0].phase;
+  var dt = snaps[snaps.length-1].time  - snaps[0].time;
+  return (dt > 0 && dp > 0) ? dp / dt : null;
 }
 
 // ── Tick one card ─────────────────────────────────────────────
@@ -538,6 +662,20 @@ function startTick() {
 }
 
 // ── Insights panel ────────────────────────────────────────────
+function fmtMin(ms) {
+  if (ms < 0) ms = 0;
+  var s = Math.round(ms/1000);
+  if (s < 60) return s + 's';
+  var m = Math.round(ms/60000);
+  if (m < 60) return m + 'm';
+  return Math.floor(m/60) + 'h ' + (m%60) + 'm';
+}
+function fmtMinSec(ms) {
+  ms = Math.abs(ms);
+  var m = Math.floor(ms/60000), s = Math.floor((ms%60000)/1000);
+  return m + 'm ' + (s<10?'0':'') + s + 's';
+}
+
 function renderInsights() {
   var igrid = document.getElementById('insGrid');
   if (!igrid) return;
@@ -552,26 +690,51 @@ function renderInsights() {
   }
 
   igrid.innerHTML = active.map(function(e) {
-    var snaps  = e.snapshots || [];
-    var ph     = estimatePhase(e, now);
-    var phLine = ph !== null ? ph.toFixed(1) : '—';
-    var p1Line = '—';
-    if (e.killTime && e.durationMs) {
-      var p1At = e.killTime + e.durationMs;
-      if (p1At > now) {
-        p1Line = 'in ' + fmtCd(p1At - now);
-      } else {
-        p1Line = hhmm(p1At) + ' (' + Math.round((now - p1At) / 60000) + 'm ago)';
-      }
+    var snaps = e.snapshots || [];
+    var phNow = estimatePhase(e, now);
+    var spawn = getSpawnAt(e);
+    var sd    = getSpawnStddev(e);
+    var rate  = getEntryRate(e);
+    var conf  = confidence(e.level);
+
+    var phLine    = phNow !== null ? phNow.toFixed(2) : '—';
+    var spawnLine = '—';
+    if (spawn) {
+      spawnLine = hhmm(spawn) + ' · ' + (spawn > now ? 'in ' + fmtMin(spawn - now) : fmtMin(now - spawn) + ' ago');
     }
-    var lastSnap = snaps.length > 0 ? 'P' + snaps[snaps.length - 1].phase.toFixed(1) : null;
+    var sdLine = (sd && spawn) ? '± ' + fmtMinSec(sd) : '—';
+
+    var rateLine = '—';
+    if (rate) {
+      var ppm = rate * 60000;
+      rateLine = ppm.toFixed(2) + ' ph/min (' + (rate / DEFAULT_PHASE_SPEED).toFixed(2) + '× ref)';
+    }
+
+    // Per-segment ETAs from current phase to 5.0
+    var segLines = [], walkPh = phNow !== null ? phNow : 1.0;
+    while (walkPh < 5.0) {
+      var segEnd = Math.min(5.0, Math.floor(walkPh) + 1);
+      var spd    = getPhaseSpeed(e.level, Math.floor(walkPh));
+      var dt     = (segEnd - walkPh) / spd;
+      segLines.push('P' + Math.floor(walkPh) + ' ' + fmtMin(dt));
+      walkPh = segEnd;
+    }
+
+    var trail = snaps.slice(-4).map(function(s){
+      var ago = Math.round((now - s.time)/60000);
+      return 'P' + s.phase.toFixed(1) + ' (' + ago + 'm ago)';
+    }).join(' → ');
+
     return [
       '<div class="ins-card">',
         '<div class="ins-lv">LV'+esc(e.level||'?')+' CH'+esc(e.channel||'?')+'</div>',
         '<div class="ins-row"><span>Phase</span><span class="ins-val">'+phLine+'</span></div>',
-        '<div class="ins-row"><span>P1 at</span><span class="ins-val">'+p1Line+'</span></div>',
-        lastSnap ? '<div class="ins-row"><span>Last snap</span><span class="ins-val">'+lastSnap+'</span></div>' : '',
-        '<div class="ins-row"><span>Snaps</span><span class="ins-val">'+snaps.length+'</span></div>',
+        '<div class="ins-row"><span>Spawn</span><span class="ins-val">'+spawnLine+'</span></div>',
+        '<div class="ins-row"><span>± window</span><span class="ins-val">'+sdLine+'</span></div>',
+        '<div class="ins-row"><span>Rate</span><span class="ins-val">'+rateLine+'</span></div>',
+        '<div class="ins-row"><span>Confidence</span><span class="ins-val '+conf.cls+'">'+conf.label+' ('+conf.n+')</span></div>',
+        segLines.length ? '<div class="ins-segs">'+segLines.map(function(l){return '<span class="ins-seg">'+l+'</span>';}).join('')+'</div>' : '',
+        trail ? '<div class="ins-trail">'+trail+'</div>' : '',
       '</div>',
     ].join('');
   }).join('');
@@ -617,6 +780,7 @@ async function loadAll() {
   if (error) { console.error('[viewer] load error', error); return; }
   entries = {};
   (data || []).forEach(function(row){ var e = rowToEntry(row); entries[e.id] = e; });
+  rebuildKnowledge();
   renderAll();
 }
 
@@ -627,6 +791,7 @@ sb.channel('boss-live')
     } else {
       var e = rowToEntry(payload.new); entries[e.id] = e;
     }
+    rebuildKnowledge();
     renderAll();
   })
   .subscribe(function(status){
