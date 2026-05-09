@@ -517,7 +517,7 @@ function cardHTML(e) {
       '<span class="state-badge '+S_BADGE[st.s]+'">'+S_LABEL[st.s]+'</span>',
     '</div>',
     '<div class="cd-wrap">',
-      '<div class="cd-num js-cdnum js-edittime" data-id="'+esc(e.id)+'" title="Click to edit time" style="color:var(--muted)">--:--</div>',
+      '<div class="cd-num js-cdnum js-edittime" data-id="'+esc(e.id)+'" title="Click to edit (time or phase, depending on what is shown)" style="color:var(--muted)">--:--</div>',
       '<div class="cd-lbl js-cdlbl"></div>',
       '<div class="cd-bar-wrap"><div class="cd-bar js-cdbar" style="width:0%"></div></div>',
     '</div>',
@@ -1284,9 +1284,22 @@ document.getElementById('grid').addEventListener('click', async function(ev){
   else if (t.closest('.js-editlv'))   await handleCardAction('lv',      id);
 });
 
+// Decide whether clicking the big "cd-num" should edit the time or add a snapshot,
+// based on what the cd-num is currently displaying. If it's showing a phase
+// (active, spawned, or snapshot-only), the natural meaning of a click is "edit/add phase".
+// If it's showing a countdown or "--:--", the natural meaning is "edit time".
+function inferTimeOrSnap(e) {
+  var st = getState(e, Date.now());
+  if (st.s === 'spawn' || st.s === 'p1' || st.s === 'late') return 'snap';
+  if (!e.killTime && e.snapshots && e.snapshots.length) return 'snap';
+  if (!e.durationMs && e.killTime) return 'snap';
+  return 'edittime';
+}
+
 async function handleCardAction(act, id) {
   var e = entries[id];
   if (!e) return;
+  if (act === 'time') act = inferTimeOrSnap(e);   // cd-num click is context-aware
   var nick = ensureNick();
   var lv = parseInt(e.level, 10);
   var ch = parseInt(e.channel, 10);
@@ -1294,14 +1307,14 @@ async function handleCardAction(act, id) {
     if (act === 'respawn') {
       await commitSnapshot(lv, ch, 5.0, nick);
     } else if (act === 'snap') {
-      var s = prompt('Phase (1.0 – 5.0, or "on"):', '');
-      if (!s) return;
+      var s = prompt('Phase (1.0 – 5.0, or "on" for respawn):', '');
+      if (s === null || s === '') return;
       var p = parseValueOnly(s, lv, ch);
       if (p.error || p.kind !== 'snap') return alert('Invalid phase: ' + (p.error || s));
       await commitSnapshot(lv, ch, p.phase, nick);
-    } else if (act === 'time') {
-      var t = prompt('New time-to-P1 (1.20 = 1h 20m, 50 = 50 min, 1:30 = 1h 30m):', '');
-      if (!t) return;
+    } else if (act === 'edittime') {
+      var t = prompt('New time-to-P1  (1.20 = 1h 20m, 50 = 50 min, 1:30 = 1h 30m):', '');
+      if (t === null || t === '') return;
       var pt = parseValueOnly(t, lv, ch);
       if (pt.error || pt.kind !== 'kill') return alert('Invalid time: ' + (pt.error || t));
       var now = Date.now();
@@ -1311,14 +1324,14 @@ async function handleCardAction(act, id) {
       }).eq('id', id);
       if (error) alert('Error: ' + error.message);
     } else if (act === 'ch') {
-      var c = prompt('New channel?', e.channel);
-      if (!c) return;
+      var c = prompt('New channel  (currently CH' + e.channel + '):', '');
+      if (c === null || c === '') return;
       var newCh = parseInt(c, 10);
       if (!newCh || String(newCh) === String(e.channel)) return;
       await moveEntry(e, lv, newCh, nick);
     } else if (act === 'lv') {
-      var l = prompt('New level?', e.level);
-      if (!l) return;
+      var l = prompt('New level  (currently LV' + e.level + '):', '');
+      if (l === null || l === '') return;
       var newLv = parseInt(l, 10);
       if (!newLv || String(newLv) === String(e.level)) return;
       await moveEntry(e, newLv, ch, nick);
