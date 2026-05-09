@@ -167,7 +167,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     </div>
     <div class="hdr-r">
       <span class="count-lbl" id="countLbl">— tracked</span>
-      <button class="snd-btn" id="sndBtn" title="Enable sound alerts">🔕 Sound</button>
+      <button class="snd-btn on" id="sndBtn" title="Sound alerts">🔔 Sound</button>
       <div class="status-pill">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusLbl">CONNECTING</span>
@@ -180,6 +180,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="fb" data-f="soon">Soon <span class="fbc" id="fc-soon"></span></button>
     <button class="fb" data-f="p1">P1 Active <span class="fbc" id="fc-p1"></span></button>
     <button class="fb" data-f="late">Late <span class="fbc" id="fc-late"></span></button>
+    <button class="ins-btn" id="sortBtn" title="Toggle sort">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
   </div>
@@ -217,9 +218,10 @@ var filt       = 'ALL';
 var qry        = '';
 var tickIv     = null;
 var prevStates = {};
-var soundOn    = false;
+var soundOn    = true;
 var audioCtx   = null;
 var insOpen    = false;
+var sortBy     = 'soonest';   // 'soonest' | 'channel'
 var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
 
 // ── Sound ─────────────────────────────────────────────────────
@@ -260,6 +262,16 @@ document.getElementById('sndBtn').addEventListener('click', function() {
   this.classList.toggle('on', soundOn);
   if (soundOn) getAudioCtx();
 });
+
+// Browsers block AudioContext until first user gesture — unlock on any input.
+function unlockAudio() {
+  var ctx = getAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume();
+  document.removeEventListener('click',   unlockAudio, true);
+  document.removeEventListener('keydown', unlockAudio, true);
+}
+document.addEventListener('click',   unlockAudio, true);
+document.addEventListener('keydown', unlockAudio, true);
 
 // ── DB row (snake_case) → entry (camelCase) ───────────────────
 function rowToEntry(row) {
@@ -624,12 +636,22 @@ function tick1(card, e, now) {
   }
 }
 
-// ── Sort (soonest first) ──────────────────────────────────────
+// ── Sort ──────────────────────────────────────────────────────
 function sortScore(e, now) {
   var st = getState(e, now);
   if (st.rem !== null && st.rem > 0) return st.rem;
   if (e.killTime && e.durationMs) return (e.killTime + e.durationMs) - now + 1000000;
   return 9999999999;
+}
+function sortByChannel(a, b) {
+  var lvA = parseInt(a.level)   || 0, lvB = parseInt(b.level)   || 0;
+  if (lvA !== lvB) return lvA - lvB;
+  var chA = parseInt(a.channel) || 0, chB = parseInt(b.channel) || 0;
+  return chA - chB;
+}
+function applySort(list, now) {
+  if (sortBy === 'channel') list.sort(sortByChannel);
+  else                      list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
 }
 
 // ── Render ────────────────────────────────────────────────────
@@ -638,7 +660,7 @@ function renderAll() {
   var empty = document.getElementById('empty');
   var now   = Date.now();
   var list  = Object.keys(entries).map(function(k){ return entries[k]; });
-  list.sort(function(a,b){ return sortScore(a,now) - sortScore(b,now); });
+  applySort(list, now);
 
   var counts = { ALL:0, wait:0, soon:0, p1:0, late:0, miss:0 };
   list.forEach(function(e){ counts.ALL++; var s=getState(e,now).s; counts[s]=(counts[s]||0)+1; });
@@ -801,6 +823,12 @@ document.querySelectorAll('.fb').forEach(function(btn){
 });
 document.getElementById('srch').addEventListener('input', function(){
   qry = this.value.trim().toLowerCase(); renderAll();
+});
+document.getElementById('sortBtn').addEventListener('click', function(){
+  sortBy = sortBy === 'soonest' ? 'channel' : 'soonest';
+  this.textContent = sortBy === 'soonest' ? '⇅ Soonest' : '⇅ Channel';
+  this.classList.toggle('on', sortBy === 'channel');
+  renderAll();
 });
 
 // ── Supabase connect ──────────────────────────────────────────
