@@ -6,7 +6,7 @@
 <title>ToS Boss Tracker — Live</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Share+Tech+Mono&family=Crimson+Pro:wght@300;400&display=swap"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -15,11 +15,12 @@
   --text:#d0cae8;--soft:#9890b8;--muted:#555070;--muted2:#2a2945;
   --gold:#c9a84c;--cream:#f0ead8;
   --col-wait:#6888cc;--col-soon:#d4a040;--col-p1:#6ecf95;--col-late:#d45868;
-  --mono:'Share Tech Mono',monospace;
+  --mono:'JetBrains Mono',monospace;
   --disp:'Cinzel',serif;
+  --body:'Inter',system-ui,sans-serif;
 }
 html,body{height:100%;min-height:100vh}
-body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;font-size:16px;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   background:radial-gradient(ellipse 60% 40% at 10% 0%,#0b1c10 0%,transparent 60%),
              radial-gradient(ellipse 45% 55% at 90% 100%,#0c0e20 0%,transparent 60%)}
@@ -34,18 +35,21 @@ header{position:sticky;top:0;z-index:100;background:rgba(9,9,15,.97);border-bott
 .logo{display:flex;align-items:center;gap:11px}
 .logo-leaf{font-size:30px;animation:sway 5s ease-in-out infinite;filter:drop-shadow(0 0 8px #6ecf9577)}
 @keyframes sway{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}
-.logo-name{font-family:var(--disp);font-size:22px;letter-spacing:4px;color:var(--gold);line-height:1;text-shadow:0 0 30px #c9a84c44}
-.logo-sub{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--muted);margin-top:3px}
-.hdr-r{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.status-pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
+.logo-name{font-family:var(--disp);font-size:20px;letter-spacing:4px;color:var(--gold);line-height:1;text-shadow:0 0 30px #c9a84c44}
+.logo-sub{font-family:var(--body);font-size:11px;letter-spacing:2px;color:var(--muted);margin-top:3px;font-weight:500;text-transform:uppercase}
+.hdr-r{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.status-pill{display:flex;align-items:center;gap:6px;font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:1px;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
 .status-dot{width:7px;height:7px;border-radius:50%;background:var(--col-late);transition:background .3s}
 .status-dot.live{background:var(--col-p1);box-shadow:0 0 6px var(--col-p1);animation:pulse 2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.count-lbl{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.count-lbl{font-family:var(--body);font-size:12px;font-weight:500;color:var(--muted)}
+.snd-btn{font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:.5px;padding:3px 10px;border-radius:20px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
+.snd-btn:hover{border-color:var(--border2);color:var(--text)}
+.snd-btn.on{border-color:#c9a84c88;color:var(--gold);background:#c9a84c11}
 
 /* ── FILTER BAR ── */
 .bar{max-width:1200px;margin:0 auto;padding:7px 24px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-top:1px solid var(--border)}
-.fb{font-family:var(--disp);font-size:12px;letter-spacing:1px;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
+.fb{font-family:var(--body);font-size:12px;font-weight:600;letter-spacing:.5px;padding:4px 14px;border-radius:20px;border:1px solid var(--muted2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}
 .fb:hover{border-color:var(--border2);color:var(--text)}
 .fb.on{background:#c9a84c18;border-color:var(--gold);color:var(--gold)}
 .fb[data-f="soon"].on{background:#d4a04018;border-color:var(--col-soon);color:var(--col-soon)}
@@ -81,13 +85,13 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 /* card header row */
 .ch{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .chips{display:flex;gap:6px;flex:1;align-items:center}
-.chip{font-family:var(--disp);font-size:13px;letter-spacing:1px;padding:3px 12px;border-radius:20px;background:var(--bg2);border:1px solid var(--border);display:inline-flex;align-items:center;gap:4px}
-.cl{color:var(--muted);font-size:10px}
-.cv{color:var(--cream);font-weight:600}
+.chip{font-family:var(--body);font-size:13px;font-weight:600;letter-spacing:.5px;padding:3px 12px;border-radius:20px;background:var(--bg2);border:1px solid var(--border);display:inline-flex;align-items:center;gap:5px}
+.cl{color:var(--muted);font-size:10px;font-weight:500;letter-spacing:1px}
+.cv{color:var(--cream);font-weight:700;font-size:14px}
 .card[data-s="p1"]  .chip{border-color:#183328}
 .card[data-s="late"] .chip{border-color:#3a1218}
 .card[data-s="soon"] .chip{border-color:#4a3800}
-.state-badge{font-family:var(--mono);font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:10px;border:1px solid currentColor;margin-left:auto;flex-shrink:0}
+.state-badge{font-family:var(--body);font-size:10px;font-weight:700;letter-spacing:1.5px;padding:2px 9px;border-radius:10px;border:1px solid currentColor;margin-left:auto;flex-shrink:0}
 .badge-wait{color:var(--col-wait);border-color:#2a3566}
 .badge-soon{color:var(--col-soon);border-color:#4a3800}
 .badge-p1{color:var(--col-p1);border-color:#183328}
@@ -96,14 +100,14 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 
 /* countdown */
 .cd-wrap{text-align:center;padding:10px 0 8px}
-.cd-num{font-family:var(--mono);font-weight:700;font-size:52px;letter-spacing:-1px;line-height:1;transition:color .4s}
-.cd-lbl{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px;margin-top:4px}
+.cd-num{font-family:var(--mono);font-weight:700;font-size:54px;letter-spacing:-2px;line-height:1;transition:color .4s}
+.cd-lbl{font-family:var(--body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:5px}
 .cd-bar-wrap{background:var(--muted2);border-radius:3px;height:3px;overflow:hidden;margin-top:8px}
 .cd-bar{height:100%;border-radius:3px;transition:width .9s linear,background .4s}
 
 /* note + footer */
-.note-row{font-family:var(--mono);font-size:10px;color:var(--soft);background:var(--bg2);border-radius:6px;padding:5px 10px;margin-top:8px;letter-spacing:.5px}
-.ro-label{text-align:center;font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--muted2);padding:4px 0 0}
+.note-row{font-family:var(--body);font-size:12px;color:var(--soft);background:var(--bg2);border-radius:6px;padding:5px 10px;margin-top:8px}
+.ro-label{text-align:center;font-family:var(--body);font-size:10px;font-weight:500;letter-spacing:1px;color:var(--muted2);padding:4px 0 0}
 </style>
 </head>
 <body>
@@ -119,6 +123,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     </div>
     <div class="hdr-r">
       <span class="count-lbl" id="countLbl">— tracked</span>
+      <button class="snd-btn" id="sndBtn" title="Enable sound alerts">🔕 Sound</button>
       <div class="status-pill">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusLbl">CONNECTING</span>
@@ -154,10 +159,52 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 <script>
 // ── State ─────────────────────────────────────────────────────
-var entries = {};
-var filt    = 'ALL';
-var qry     = '';
-var tickIv  = null;
+var entries    = {};
+var filt       = 'ALL';
+var qry        = '';
+var tickIv     = null;
+var prevStates = {};
+var soundOn    = false;
+var audioCtx   = null;
+
+// ── Sound ─────────────────────────────────────────────────────
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function beep(notes) {
+  if (!soundOn) return;
+  var ctx = getAudioCtx();
+  notes.forEach(function(n) {
+    var freq = n[0], delay = n[1], dur = n[2], vol = n[3];
+    var osc  = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'sine'; osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+    gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + delay + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + dur + 0.05);
+  });
+}
+function checkTransition(id, newState) {
+  var prev = prevStates[id];
+  prevStates[id] = newState;
+  if (!prev || prev === newState) return;
+  if (newState === 'soon') {
+    beep([[660,0,.18,.25],[660,.25,.18,.25]]);
+  } else if (newState === 'p1') {
+    beep([[880,0,.12,.4],[1047,.18,.14,.4],[1319,.36,.18,.5]]);
+  }
+}
+
+document.getElementById('sndBtn').addEventListener('click', function() {
+  soundOn = !soundOn;
+  this.textContent = soundOn ? '🔔 Sound' : '🔕 Sound';
+  this.classList.toggle('on', soundOn);
+  if (soundOn) getAudioCtx();
+});
 
 // ── DB row (snake_case) → entry (camelCase) ───────────────────
 function rowToEntry(row) {
@@ -232,6 +279,7 @@ function cardHTML(e) {
 function tick1(card, e, now) {
   var st = getState(e, now);
   card.dataset.s = st.s;
+  checkTransition(e.id, st.s);
 
   var badge = card.querySelector('.state-badge');
   if (badge) { badge.className = 'state-badge ' + S_BADGE[st.s]; badge.textContent = S_LABEL[st.s]; }
