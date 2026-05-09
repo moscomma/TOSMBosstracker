@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ToS Boss Tracker — Login</title>
+<style>
+  :root{--bg:#0d1117;--bg2:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--accent:#3fb950;--err:#f85149}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,sans-serif}
+  .box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:28px 24px;width:300px;text-align:center}
+  h1{margin:0 0 6px;font-size:18px;font-weight:600}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:18px}
+  input{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;outline:none;margin-bottom:12px}
+  input:focus{border-color:var(--accent)}
+  button{width:100%;padding:10px;background:var(--accent);color:#0d1117;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:wait}
+  .err{color:var(--err);font-size:12px;margin-top:10px;min-height:16px}
+</style>
+</head>
+<body>
+  <form class="box" id="f" autocomplete="off">
+    <h1>ToS Boss Tracker</h1>
+    <div class="sub">Enter password to continue</div>
+    <input type="password" id="pw" placeholder="password" autofocus required>
+    <button type="submit" id="b">Unlock</button>
+    <div class="err" id="e"></div>
+  </form>
+<script>
+  var f = document.getElementById('f'), pw = document.getElementById('pw'),
+      b = document.getElementById('b'), e = document.getElementById('e');
+  f.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    e.textContent = ''; b.disabled = true; b.textContent = '...';
+    try {
+      var r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw.value }),
+      });
+      if (r.ok) { location.href = '/'; return; }
+      e.textContent = 'Wrong password';
+    } catch (err) { e.textContent = 'Error: ' + err.message; }
+    b.disabled = false; b.textContent = 'Unlock'; pw.select();
+  });
+</script>
+</body>
+</html>

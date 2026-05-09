@@ -159,6 +159,46 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .ins-now{font-family:var(--mono);font-size:11px;color:var(--soft);font-weight:400;letter-spacing:0;margin-left:auto}
 .ins-close{margin-left:0 !important}
 .ins-bk{font-size:9px;color:var(--muted);margin-left:4px}
+
+/* ── ADD/EDIT MODAL ── */
+.add-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--col-p1);background:#6ecf9518;color:var(--col-p1);cursor:pointer;transition:all .15s}
+.add-btn:hover{background:#6ecf9528;box-shadow:0 0 10px #6ecf9533}
+.mod-bg{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto}
+.mod-bg.show{display:flex}
+.mod{background:var(--panel);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:420px;padding:18px 20px 16px;box-shadow:0 20px 60px #000a;animation:popIn .2s ease}
+.mod-h{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.mod-t{font-family:var(--disp);font-size:14px;letter-spacing:3px;color:var(--gold);flex:1}
+.mod-x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
+.mod-x:hover{color:var(--text)}
+.mod-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+.mod-tab{flex:1;font-family:var(--body);font-size:12px;font-weight:600;padding:7px 10px;border:none;background:none;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.mod-tab:hover{color:var(--text)}
+.mod-tab.on{color:var(--col-p1);border-bottom-color:var(--col-p1)}
+.mod-pane{display:none}
+.mod-pane.on{display:block}
+.mod-row{display:flex;gap:8px;margin-bottom:10px}
+.mod-fld{flex:1}
+.mod-lbl{font-family:var(--body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;display:block;margin-bottom:4px}
+.mod-in,.mod-sel{width:100%;padding:8px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none}
+.mod-in:focus,.mod-sel:focus{border-color:var(--col-p1)}
+.mod-hint{font-family:var(--body);font-size:10px;color:var(--muted2);margin-top:3px}
+.mod-msg{font-family:var(--body);font-size:11px;min-height:14px;margin-top:6px}
+.mod-msg.err{color:var(--col-late)}
+.mod-msg.ok{color:var(--col-p1)}
+.mod-act{display:flex;gap:8px;margin-top:14px}
+.mod-btn{flex:1;font-family:var(--body);font-size:12px;font-weight:600;letter-spacing:.5px;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--soft);cursor:pointer;transition:all .15s}
+.mod-btn:hover{border-color:var(--border2);color:var(--text)}
+.mod-btn.primary{background:#6ecf9528;border-color:var(--col-p1);color:var(--col-p1)}
+.mod-btn.primary:hover{background:#6ecf9540;box-shadow:0 0 10px #6ecf9544}
+.mod-btn.danger{background:#d4586818;border-color:var(--col-late);color:var(--col-late)}
+.mod-btn.danger:hover{background:#d4586828}
+.mod-btn:disabled{opacity:.5;cursor:wait}
+.ed-list{max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}
+.ed-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-family:var(--mono);font-size:12px;display:flex;justify-content:space-between;align-items:center}
+.ed-item:last-child{border-bottom:none}
+.ed-item:hover{background:#1f2238}
+.ed-item.sel{background:#6ecf9518;color:var(--col-p1)}
+.ed-meta{font-size:10px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -189,6 +229,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="fb" data-f="spawn">🔥 Boss Respawn <span class="fbc" id="fc-spawn"></span></button>
     <button class="ins-btn" id="sortBtn" title="Toggle sort">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
+    <button class="add-btn" id="addBtn" title="Add or edit boss data">+ Add</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
   </div>
 </header>
@@ -205,6 +246,78 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   <div id="empty">No bosses being tracked right now.</div>
   <div id="grid"></div>
 </main>
+
+<!-- Add / Edit modal -->
+<div class="mod-bg" id="modBg">
+  <div class="mod" role="dialog" aria-modal="true">
+    <div class="mod-h">
+      <div class="mod-t">ADD BOSS DATA</div>
+      <button class="mod-x" id="modX" title="Close">✕</button>
+    </div>
+    <div class="mod-tabs">
+      <button class="mod-tab on" data-pane="kill">Kill</button>
+      <button class="mod-tab"    data-pane="snap">Snapshot</button>
+      <button class="mod-tab"    data-pane="edit">Edit / Delete</button>
+    </div>
+
+    <!-- KILL pane -->
+    <div class="mod-pane on" data-pane="kill">
+      <div class="mod-row">
+        <div class="mod-fld"><label class="mod-lbl">Level</label><input class="mod-in" id="kLvl" type="number" min="1" max="999" placeholder="145"/></div>
+        <div class="mod-fld"><label class="mod-lbl">Channel</label><input class="mod-in" id="kCh" type="number" min="1" max="99" placeholder="3"/></div>
+      </div>
+      <div class="mod-fld">
+        <label class="mod-lbl">Time to P1</label>
+        <input class="mod-in" id="kDur" placeholder="1h 30m  or  90m  or  5400"/>
+        <div class="mod-hint">Examples: <code>1h30m</code>, <code>90m</code>, <code>5400</code> (seconds)</div>
+      </div>
+      <div class="mod-msg" id="kMsg"></div>
+      <div class="mod-act">
+        <button class="mod-btn" id="kCancel">Cancel</button>
+        <button class="mod-btn primary" id="kSave">Save kill</button>
+      </div>
+    </div>
+
+    <!-- SNAPSHOT pane -->
+    <div class="mod-pane" data-pane="snap">
+      <div class="mod-row">
+        <div class="mod-fld"><label class="mod-lbl">Level</label><input class="mod-in" id="sLvl" type="number" min="1" max="999" placeholder="145"/></div>
+        <div class="mod-fld"><label class="mod-lbl">Channel</label><input class="mod-in" id="sCh" type="number" min="1" max="99" placeholder="3"/></div>
+      </div>
+      <div class="mod-fld">
+        <label class="mod-lbl">Phase (1.0 – 5.0)</label>
+        <input class="mod-in" id="sPh" placeholder="4.2  or  on  (= 5.0 respawn)"/>
+        <div class="mod-hint">5.0 or <code>on</code> = boss respawned</div>
+      </div>
+      <div class="mod-msg" id="sMsg"></div>
+      <div class="mod-act">
+        <button class="mod-btn" id="sCancel">Cancel</button>
+        <button class="mod-btn primary" id="sSave">Save snapshot</button>
+      </div>
+    </div>
+
+    <!-- EDIT/DELETE pane -->
+    <div class="mod-pane" data-pane="edit">
+      <div class="mod-fld">
+        <label class="mod-lbl">Pick an entry</label>
+        <div class="ed-list" id="eList"></div>
+      </div>
+      <div class="mod-row" style="margin-top:10px">
+        <div class="mod-fld">
+          <label class="mod-lbl">New time-to-P1 (optional)</label>
+          <input class="mod-in" id="eDur" placeholder="leave empty to skip"/>
+        </div>
+      </div>
+      <div class="mod-msg" id="eMsg"></div>
+      <div class="mod-act">
+        <button class="mod-btn"        id="eCancel">Cancel</button>
+        <button class="mod-btn danger" id="eDel">Delete</button>
+        <button class="mod-btn primary" id="eSave">Save edit</button>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <!--
   CONFIGURATION — fill in your Supabase project URL and anon key.
@@ -952,6 +1065,190 @@ sb.channel('boss-live')
   .subscribe(function(status){
     setLive(status === 'SUBSCRIBED');
   });
+
+// ── Add / Edit modal ─────────────────────────────────────────
+var nickname = '';
+try { nickname = localStorage.getItem('tosm_nick') || ''; } catch(_) {}
+
+function ensureNick() {
+  if (nickname) return nickname;
+  var n = (prompt('Your name (shown in notes):') || '').trim();
+  nickname = (n || 'guest').slice(0, 20);
+  try { localStorage.setItem('tosm_nick', nickname); } catch(_) {}
+  return nickname;
+}
+
+function parseDuration(str) {
+  if (str === null || str === undefined) return null;
+  str = String(str).trim().toLowerCase();
+  if (!str) return null;
+  // h+m form: "1h30m", "1h 30m", "2h", "45m"
+  var hm = str.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?$/);
+  if (hm && (hm[1] || hm[2])) {
+    var h = parseInt(hm[1] || '0', 10), m = parseInt(hm[2] || '0', 10);
+    return (h * 3600 + m * 60) * 1000;
+  }
+  // bare integer = seconds
+  if (/^\d+$/.test(str)) return parseInt(str, 10) * 1000;
+  return null;
+}
+
+function entryId(level, ch) { return 'dc_' + level + '_' + ch; }
+function modMsg(id, text, kind) {
+  var el = document.getElementById(id);
+  el.textContent = text || '';
+  el.className = 'mod-msg' + (kind ? ' ' + kind : '');
+}
+
+var modBg = document.getElementById('modBg');
+function openModal()  { modBg.classList.add('show');    refreshEditList(); }
+function closeModal() { modBg.classList.remove('show'); }
+document.getElementById('addBtn').addEventListener('click', openModal);
+document.getElementById('modX').addEventListener('click', closeModal);
+modBg.addEventListener('click', function(ev){ if (ev.target === modBg) closeModal(); });
+document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && modBg.classList.contains('show')) closeModal(); });
+
+document.querySelectorAll('.mod-tab').forEach(function(t){
+  t.addEventListener('click', function(){
+    var pane = t.dataset.pane;
+    document.querySelectorAll('.mod-tab').forEach(function(x){ x.classList.toggle('on', x.dataset.pane === pane); });
+    document.querySelectorAll('.mod-pane').forEach(function(p){ p.classList.toggle('on', p.dataset.pane === pane); });
+    if (pane === 'edit') refreshEditList();
+  });
+});
+
+// ── KILL ─────────────────────────────────────────────────────
+async function saveKill() {
+  var lvl  = parseInt(document.getElementById('kLvl').value, 10);
+  var ch   = parseInt(document.getElementById('kCh').value, 10);
+  var dur  = parseDuration(document.getElementById('kDur').value);
+  if (!lvl || !ch)               return modMsg('kMsg', 'Level and channel required', 'err');
+  if (!dur || dur < 5*60000 || dur > 12*3600000)
+                                  return modMsg('kMsg', 'Duration must be between 5 min and 12 h', 'err');
+  var nick = ensureNick();
+  var now  = Date.now();
+  var btn  = document.getElementById('kSave'); btn.disabled = true;
+  modMsg('kMsg', 'Saving…');
+  var { error } = await sb.from('boss_entries').upsert({
+    id: entryId(lvl, ch),
+    level: String(lvl), channel: String(ch),
+    kill_time: now, duration_ms: dur,
+    snapshots: [], note: 'via web @' + nick,
+    created_at: now, missing: false, synced_at: now,
+  });
+  btn.disabled = false;
+  if (error) return modMsg('kMsg', 'Error: ' + error.message, 'err');
+  modMsg('kMsg', 'Saved ✓', 'ok');
+  document.getElementById('kDur').value = '';
+  setTimeout(closeModal, 600);
+}
+document.getElementById('kSave').addEventListener('click', saveKill);
+document.getElementById('kCancel').addEventListener('click', closeModal);
+
+// ── SNAPSHOT ─────────────────────────────────────────────────
+async function saveSnapshot() {
+  var lvl = parseInt(document.getElementById('sLvl').value, 10);
+  var ch  = parseInt(document.getElementById('sCh').value, 10);
+  var raw = String(document.getElementById('sPh').value || '').trim().toLowerCase();
+  var phase;
+  if (raw === 'on' || raw === 'spawn' || raw === 'respawn') phase = 5.0;
+  else phase = parseFloat(raw);
+  if (!lvl || !ch)                 return modMsg('sMsg', 'Level and channel required', 'err');
+  if (!isFinite(phase) || phase < 1 || phase > 5)
+                                    return modMsg('sMsg', 'Phase must be 1.0–5.0 (or "on")', 'err');
+  var nick    = ensureNick();
+  var now     = Date.now();
+  var rounded = Math.round(phase * 10) / 10;
+  var id      = entryId(lvl, ch);
+  var btn     = document.getElementById('sSave'); btn.disabled = true;
+  modMsg('sMsg', 'Saving…');
+  var { data: existing } = await sb.from('boss_entries').select('*').eq('id', id).maybeSingle();
+  var snaps = (existing && existing.snapshots) || [];
+  snaps.push({ phase: rounded, time: now });
+  var payload = {
+    id: id, level: String(lvl), channel: String(ch),
+    snapshots: snaps,
+    note: 'via web @' + nick + (rounded >= 5 ? ' · respawn' : ''),
+    synced_at: now,
+  };
+  if (existing) {
+    if (existing.kill_time)   payload.kill_time   = existing.kill_time;
+    if (existing.duration_ms) payload.duration_ms = existing.duration_ms;
+    if (existing.created_at)  payload.created_at  = existing.created_at;
+  } else {
+    payload.kill_time = 0; payload.duration_ms = 0; payload.created_at = now; payload.missing = false;
+  }
+  var { error } = await sb.from('boss_entries').upsert(payload);
+  btn.disabled = false;
+  if (error) return modMsg('sMsg', 'Error: ' + error.message, 'err');
+  modMsg('sMsg', rounded >= 5 ? '🔥 Boss respawned ✓' : 'Phase ' + rounded + ' saved ✓', 'ok');
+  document.getElementById('sPh').value = '';
+  setTimeout(closeModal, 700);
+}
+document.getElementById('sSave').addEventListener('click', saveSnapshot);
+document.getElementById('sCancel').addEventListener('click', closeModal);
+
+// ── EDIT / DELETE ────────────────────────────────────────────
+var editSelectedId = null;
+
+function refreshEditList() {
+  var ul = document.getElementById('eList');
+  var ids = Object.keys(entries).sort();
+  if (!ids.length) { ul.innerHTML = '<div class="ed-item" style="cursor:default;color:var(--muted)">No entries yet</div>'; return; }
+  ul.innerHTML = ids.map(function(id){
+    var e = entries[id];
+    var src = id.indexOf('dc_') === 0 ? 'discord/web' : 'electron';
+    return '<div class="ed-item" data-id="'+esc(id)+'">'
+         +   '<span>LV'+esc(e.level)+' CH'+esc(e.channel)+'</span>'
+         +   '<span class="ed-meta">'+src+'</span>'
+         + '</div>';
+  }).join('');
+  ul.querySelectorAll('.ed-item').forEach(function(item){
+    if (!item.dataset.id) return;
+    item.addEventListener('click', function(){
+      editSelectedId = item.dataset.id;
+      ul.querySelectorAll('.ed-item').forEach(function(x){ x.classList.remove('sel'); });
+      item.classList.add('sel');
+      modMsg('eMsg', 'Selected: ' + editSelectedId);
+    });
+  });
+}
+
+async function saveEdit() {
+  if (!editSelectedId) return modMsg('eMsg', 'Pick an entry first', 'err');
+  var dur = parseDuration(document.getElementById('eDur').value);
+  if (!dur) return modMsg('eMsg', 'Enter a new duration to save (or use Delete)', 'err');
+  var nick = ensureNick();
+  var now  = Date.now();
+  var btn  = document.getElementById('eSave'); btn.disabled = true;
+  modMsg('eMsg', 'Saving…');
+  var { error } = await sb.from('boss_entries').update({
+    kill_time: now, duration_ms: dur,
+    note: 'edit via web @' + nick, synced_at: now,
+  }).eq('id', editSelectedId);
+  btn.disabled = false;
+  if (error) return modMsg('eMsg', 'Error: ' + error.message, 'err');
+  modMsg('eMsg', 'Updated ✓', 'ok');
+  document.getElementById('eDur').value = '';
+  setTimeout(closeModal, 600);
+}
+
+async function deleteEntry() {
+  if (!editSelectedId) return modMsg('eMsg', 'Pick an entry first', 'err');
+  if (!confirm('Delete ' + editSelectedId + '?')) return;
+  var btn = document.getElementById('eDel'); btn.disabled = true;
+  modMsg('eMsg', 'Deleting…');
+  var { error } = await sb.from('boss_entries').delete().eq('id', editSelectedId);
+  btn.disabled = false;
+  if (error) return modMsg('eMsg', 'Error: ' + error.message, 'err');
+  modMsg('eMsg', 'Deleted ✓', 'ok');
+  editSelectedId = null;
+  setTimeout(closeModal, 500);
+}
+
+document.getElementById('eSave').addEventListener('click', saveEdit);
+document.getElementById('eDel').addEventListener('click', deleteEntry);
+document.getElementById('eCancel').addEventListener('click', closeModal);
 
 // Boot
 loadAll();
