@@ -495,12 +495,29 @@ function bangkokTimeStr(ts) {
 }
 function hourBucket(ts) {
   var h = bangkokHour(ts);
-  if (h >= 18 && h < 23) return 'peak';
-  if (h >= 23 || h < 2)  return 'late';
-  if (h >= 2  && h < 8)  return 'sleep';
-  return 'day';
+  if (h < 4)  return 'sleep';
+  if (h < 8)  return 'dawn';
+  if (h < 12) return 'morning';
+  if (h < 16) return 'noon';
+  if (h < 20) return 'evening';
+  return 'night';
 }
-var BUCKET_LABEL = { peak: '🔥 peak', late: '🌃 late', sleep: '😴 sleep', day: '☀ day' };
+var BUCKET_LABEL = {
+  sleep:   '😴 sleep',
+  dawn:    '🌅 dawn',
+  morning: '☀ morning',
+  noon:    '🌤 noon',
+  evening: '🌆 evening',
+  night:   '🌙 night',
+};
+
+// 'wkd' = Mon-Fri, 'wke' = Sat-Sun, in Bangkok local time.
+function dayType(ts) {
+  var bkkMs = ts + 7 * 60 * 60 * 1000;          // shift to UTC+7
+  var dow   = new Date(bkkMs).getUTCDay();      // 0=Sun … 6=Sat
+  return (dow === 0 || dow === 6) ? 'wke' : 'wkd';
+}
+var DAYTYPE_LABEL = { wkd: '📅 weekday', wke: '🎉 weekend' };
 
 // ── Activity gating ──────────────────────────────────────────
 // A level is "active" if any of its entries had a snapshot or kill
@@ -638,23 +655,49 @@ function weightedTrimMean(samples, trimPct) {
 function getPhaseSpeed(level, segment, atTime) {
   var raw = knowledge['lv' + level] || [];
   if (!raw.length) return DEFAULT_PHASE_SPEED;
-  var now = Date.now();
-  var bucket = hourBucket(atTime || now);
-  var dec = raw.map(function(s){ return { spd: s.spd, w: s.w * decayWeight(s.ts, now), seg: s.seg, hb: s.hb }; });
-  // Cascade: bucket+segment → segment-only → bucket-only → level-global → default
-  var bs = dec.filter(function(s){ return s.seg === segment && s.hb === bucket; });
-  if (bs.length >= 3) return weightedTrimMean(bs, 0.15) || DEFAULT_PHASE_SPEED;
-  var sg = dec.filter(function(s){ return s.seg === segment; });
-  if (sg.length >= 3) return weightedTrimMean(sg, 0.15) || DEFAULT_PHASE_SPEED;
-  var bk = dec.filter(function(s){ return s.hb === bucket; });
-  if (bk.length >= 3) return weightedTrimMean(bk, 0.15) || DEFAULT_PHASE_SPEED;
-  if (dec.length >= 3) return weightedTrimMean(dec, 0.15) || DEFAULT_PHASE_SPEED;
+  var now    = Date.now();
+  var t      = atTime || now;
+  var bucket = hourBucket(t);
+  var dt     = dayType(t);
+
+  // Re-derive each sample's bucket + day-type from its ts. Stored s.hb
+  // is ignored — old 4-bucket values would be stale under the new scheme.
+  var dec = raw.map(function(s){
+    return {
+      spd: s.spd,
+      w:   s.w * decayWeight(s.ts, now),
+      seg: s.seg,
+      hb:  hourBucket(s.ts),
+      dt:  dayType(s.ts),
+    };
+  });
+
+  // Cascade — most specific to most general.
+  // Tier 1: dayType + bucket + segment   (e.g. weekend evening seg3)
+  // Tier 2: bucket + segment             (existing top tier)
+  // Tier 3: segment                      (any time, any day)
+  // Tier 4: bucket                       (this hour, any segment)
+  // Tier 5: level                        (any sample for this level)
+  // Tier 6: DEFAULT_PHASE_SPEED
+  var tiers = [
+    dec.filter(function(s){ return s.seg === segment && s.hb === bucket && s.dt === dt; }),
+    dec.filter(function(s){ return s.seg === segment && s.hb === bucket; }),
+    dec.filter(function(s){ return s.seg === segment; }),
+    dec.filter(function(s){ return s.hb === bucket; }),
+    dec,
+  ];
+  for (var i = 0; i < tiers.length; i++) {
+    if (tiers[i].length >= 3) {
+      var v = weightedTrimMean(tiers[i], 0.15);
+      if (v) return v;
+    }
+  }
   return DEFAULT_PHASE_SPEED;
 }
 
 function confidence(level) {
   var n = (knowledge['lv' + level] || []).length;
-  if (n >= 8) return { label: '✦ adaptive', n: n, cls: 'conf-ad' };
+  if (n >= 5) return { label: '✦ adaptive', n: n, cls: 'conf-ad' };
   if (n >= 3) return { label: '≈ learning', n: n, cls: 'conf-lr' };
   return        { label: '· fallback',  n: n, cls: 'conf-fb' };
 }
@@ -990,7 +1033,10 @@ function renderInsights() {
   var inow  = document.getElementById('insNow');
   if (!igrid) return;
   var now  = Date.now();
-  if (inow) inow.textContent = 'BKK ' + bangkokTimeStr(now) + ' · ' + BUCKET_LABEL[hourBucket(now)];
+  if (inow) inow.textContent =
+    'BKK ' + bangkokTimeStr(now) +
+    ' · ' + BUCKET_LABEL[hourBucket(now)] +
+    ' · ' + DAYTYPE_LABEL[dayType(now)];
 
   // Group active entries by level
   var byLevel = {};
@@ -1492,7 +1538,7 @@ async function migrateLegacySamples() {
           spd: s.spd, ts: s.ts,
           seg: typeof s.seg === 'number' ? s.seg : 0,
           w: typeof s.w === 'number' ? s.w : 2,
-          hb: s.hb || 'day',
+          hb: s.hb || 'noon',
           source_id: 'legacy_localstorage',
         });
       }
