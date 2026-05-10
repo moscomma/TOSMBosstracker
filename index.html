@@ -1140,7 +1140,7 @@ sb.channel('boss-live')
       entries[e.id] = e;
       // Persist any new derivable sample so cross-cycle learning grows over time
       if (e.level && e.snapshots && e.snapshots.length >= 2) {
-        persistLatestSample(String(e.level), e.snapshots);
+        persistLatestSample(String(e.level), e.snapshots, e.id);
       }
     }
     rebuildKnowledge();
@@ -1265,7 +1265,7 @@ async function commitSnapshot(level, ch, phase, nick) {
   var { error } = await sb.from('boss_entries').upsert(payload);
   if (error) throw new Error(error.message);
   // Persist sample for cross-cycle learning
-  if (snaps.length >= 2) persistLatestSample(String(level), snaps);
+  if (snaps.length >= 2) persistLatestSample(String(level), snaps, entryId(level, ch));
 }
 
 // ── Modal open / close ───────────────────────────────────────
@@ -1434,42 +1434,114 @@ async function moveEntry(e, newLv, newCh, nick) {
   }
 }
 
-// ── Persisted phase samples (survives kill cycles) ───────────
-var SAMPLE_KEY = 'tos_phase_samples_v1';
+// ── Persisted phase samples (Supabase-backed; shared across browsers) ──
+var SAMPLE_KEY_LEGACY = 'tos_phase_samples_v1';   // for one-time migration only
 var persistedSamples = {};   // { 'lv145': [{spd, ts, seg, w, hb}, ...] }
-try {
-  var raw = localStorage.getItem(SAMPLE_KEY);
-  if (raw) persistedSamples = JSON.parse(raw) || {};
-} catch (_) { persistedSamples = {}; }
 
-function savePersisted() {
-  try { localStorage.setItem(SAMPLE_KEY, JSON.stringify(persistedSamples)); } catch (_) {}
+async function loadSamples() {
+  var { data, error } = await sb.from('phase_samples')
+    .select('level, spd, ts, seg, w, hb')
+    .order('ts', { ascending: true });
+  if (error) { console.warn('[insights] sample load failed', error); return; }
+  persistedSamples = {};
+  (data || []).forEach(function(r){
+    var key = 'lv' + r.level;
+    if (!persistedSamples[key]) persistedSamples[key] = [];
+    persistedSamples[key].push({ spd: r.spd, ts: r.ts, seg: r.seg, w: r.w, hb: r.hb });
+  });
 }
 
-function persistLatestSample(level, snaps) {
+async function persistLatestSample(level, snaps, sourceId) {
   if (snaps.length < 2) return;
   var a = snaps[snaps.length - 2], b = snaps[snaps.length - 1];
   var dt = b.time - a.time, dp = b.phase - a.phase;
   if (dt < 120000 || dp <= 0) return;
-  var key = 'lv' + level;
-  if (!persistedSamples[key]) persistedSamples[key] = [];
-  // Dedupe — UPDATE events on unrelated fields would otherwise re-add the same pair
-  var arr = persistedSamples[key];
-  for (var i = arr.length - 1; i >= Math.max(0, arr.length - 8); i--) {
-    if (arr[i].ts === b.time) return;
-  }
-  arr.push({
-    spd: dp / dt, ts: b.time,
+  var row = {
+    level: String(level),
+    spd: dp / dt,
+    ts: b.time,
     seg: Math.floor(a.phase) === Math.floor(b.phase) ? Math.floor(a.phase) : 0,
-    w: 2, hb: hourBucket(b.time),
-  });
-  if (arr.length > 200) persistedSamples[key] = arr.slice(-200);
-  savePersisted();
+    w: 2,
+    hb: hourBucket(b.time),
+    source_id: sourceId || null,
+  };
+  // Best-effort insert; the unique (level, ts) index dedupes server-side.
+  try {
+    var { error } = await sb.from('phase_samples').insert(row);
+    if (error && !/duplicate key/i.test(error.message || '')) {
+      console.warn('[insights] sample insert failed', error);
+    }
+  } catch (e) { console.warn('[insights] sample insert threw', e); }
 }
 
+async function migrateLegacySamples() {
+  var raw = null;
+  try { raw = localStorage.getItem(SAMPLE_KEY_LEGACY); } catch(_) {}
+  if (!raw) return;
+  var legacy;
+  try { legacy = JSON.parse(raw); } catch(_) { return; }
+  if (!legacy || typeof legacy !== 'object') return;
+
+  var rows = [];
+  Object.keys(legacy).forEach(function(key){
+    var lv = key.replace(/^lv/, '');
+    (legacy[key] || []).forEach(function(s){
+      if (s && s.ts && typeof s.spd === 'number') {
+        rows.push({
+          level: String(lv),
+          spd: s.spd, ts: s.ts,
+          seg: typeof s.seg === 'number' ? s.seg : 0,
+          w: typeof s.w === 'number' ? s.w : 2,
+          hb: s.hb || 'day',
+          source_id: 'legacy_localstorage',
+        });
+      }
+    });
+  });
+  if (!rows.length) {
+    try { localStorage.removeItem(SAMPLE_KEY_LEGACY); } catch(_) {}
+    return;
+  }
+
+  for (var i = 0; i < rows.length; i += 500) {
+    var chunk = rows.slice(i, i + 500);
+    var { error } = await sb.from('phase_samples').insert(chunk);
+    if (error && !/duplicate key/i.test(error.message || '')) {
+      console.warn('[insights] migration chunk failed, leaving localStorage in place', error);
+      return;
+    }
+  }
+  console.log('[insights] migrated ' + rows.length + ' legacy samples to Supabase');
+  try { localStorage.removeItem(SAMPLE_KEY_LEGACY); } catch(_) {}
+}
+
+// Realtime: merge any sample inserted by another browser into our in-memory map.
+sb.channel('insights-live')
+  .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'phase_samples' },
+      function(payload){
+        var r = payload.new;
+        if (!r || !r.level) return;
+        var key = 'lv' + r.level;
+        if (!persistedSamples[key]) persistedSamples[key] = [];
+        var arr = persistedSamples[key];
+        for (var i = arr.length - 1; i >= Math.max(0, arr.length - 16); i--) {
+          if (arr[i].ts === r.ts) return;
+        }
+        arr.push({ spd: r.spd, ts: r.ts, seg: r.seg, w: r.w, hb: r.hb });
+        rebuildKnowledge();
+        renderAll();
+      })
+  .subscribe();
+
 // Boot
-loadAll();
-startTick();
+(async function boot(){
+  await loadSamples();
+  await migrateLegacySamples();
+  await loadSamples();    // re-fetch in case migration added rows
+  await loadAll();        // existing entry loader; calls rebuildKnowledge internally
+  startTick();
+})();
 </script>
 
 </body>
