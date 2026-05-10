@@ -173,6 +173,8 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 /* ── ADD/EDIT MODAL ── */
 .add-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--col-p1);background:#6ecf9518;color:var(--col-p1);cursor:pointer;transition:all .15s}
 .add-btn:hover{background:#6ecf9528;box-shadow:0 0 10px #6ecf9533}
+.clr-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--col-late);background:#e85d6c14;color:var(--col-late);cursor:pointer;transition:all .15s}
+.clr-btn:hover{background:#e85d6c24;box-shadow:0 0 10px #e85d6c33}
 .mod-bg{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto}
 .mod-bg.show{display:flex}
 .mod{background:var(--panel);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:420px;padding:18px 20px 16px;box-shadow:0 20px 60px #000a;animation:popIn .2s ease}
@@ -257,6 +259,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="ins-btn" id="sortBtn" title="Toggle sort (Soonest / Channel / Stable)">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
     <button class="add-btn" id="addBtn" title="Add or edit boss data">+ Add</button>
+    <button class="clr-btn" id="clrBtn" title="Delete ALL tracked bosses">🗑 Clear All</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
   </div>
 </header>
@@ -1272,6 +1275,25 @@ function closeModal() { modBg.classList.remove('show'); }
 document.getElementById('addBtn').addEventListener('click', openModal);
 document.getElementById('modX').addEventListener('click', closeModal);
 document.getElementById('addCancel').addEventListener('click', closeModal);
+
+document.getElementById('clrBtn').addEventListener('click', async function(){
+  var ids = Object.keys(entries);
+  if (ids.length === 0) return alert('Nothing to clear.');
+  var typed = prompt('This will delete ALL ' + ids.length +
+    ' tracked bosses.\n\nType CLEAR to confirm:', '');
+  if (typed === null) return;
+  if (typed.trim().toUpperCase() !== 'CLEAR') {
+    return alert('Cancelled — you typed "' + typed + '" instead of CLEAR.');
+  }
+  try {
+    var nick = ensureNick();
+    var { error } = await sb.from('boss_entries').delete().neq('id', '');
+    if (error) return alert('Error: ' + error.message);
+    console.log('[viewer] Cleared all by @' + nick);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+});
 modBg.addEventListener('click', function(ev){ if (ev.target === modBg) closeModal(); });
 document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && modBg.classList.contains('show')) { closeCardMenu(); closeModal(); } });
 
