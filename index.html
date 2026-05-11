@@ -411,7 +411,7 @@ function checkTransition(id, newState) {
   if (!prev || prev === newState) return;
   if      (newState === 'soon')  { beep(SOUND_SOON);  markAlerting(id); }
   else if (newState === 'p1')    { beep(SOUND_P1);    markAlerting(id); }
-  else if (newState === 'spawn') { beep(SOUND_SPAWN); autoFocusSpawn(); markAlerting(id); }
+  else if (newState === 'spawn') { beep(SOUND_SPAWN); markAlerting(id); }
 }
 
 // When any card freshly transitions to spawn, auto-switch the filter to
