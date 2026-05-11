@@ -175,6 +175,29 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .add-btn:hover{background:#6ecf9528;box-shadow:0 0 10px #6ecf9533}
 .clr-btn{font-family:var(--body);font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;border:1px solid var(--col-late);background:#e85d6c14;color:var(--col-late);cursor:pointer;transition:all .15s}
 .clr-btn:hover{background:#e85d6c24;box-shadow:0 0 10px #e85d6c33}
+
+/* ── Floating quick-add bar ────────────────────────────── */
+.qa{position:fixed;right:14px;bottom:14px;z-index:150;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(18,20,26,.92);border:1px solid #2a2e38;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);backdrop-filter:blur(8px);font-family:var(--body)}
+.qa input{width:200px;background:transparent;border:none;outline:none;color:#e8e8f0;font-size:13px;padding:4px 2px}
+.qa input::placeholder{color:#6a6e78}
+.qa-btn{background:#3a7bd5;color:#fff;border:none;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:13px;font-weight:600}
+.qa-btn:hover{background:#4a8be5}
+.qa-btn:disabled{opacity:.5;cursor:not-allowed}
+.qa-status{position:absolute;right:0;bottom:100%;margin-bottom:6px;font-size:11px;white-space:nowrap;padding:3px 8px;border-radius:6px;background:rgba(18,20,26,.92);border:1px solid #2a2e38}
+.qa-status.ok{color:#6fdf99}
+.qa-status.err{color:#ff7a7a}
+.qa-status:empty{display:none}
+.qa-pip-btn{background:transparent;border:1px solid #2a2e38;color:#9aa0ac;border-radius:6px;padding:2px 6px;cursor:pointer;font-size:14px;line-height:1}
+.qa-pip-btn:hover{background:#22262e;color:#e8e8f0}
+.qa.qa-pip{position:static;right:auto;bottom:auto;width:100%;height:100%;border-radius:0;border:none;box-shadow:none;padding:10px 12px;background:rgba(18,20,26,1)}
+.qa.qa-pip input{width:100%}
+.qa.qa-pip .qa-pip-btn{display:none}
+.qa.qa-pip .qa-status{position:static;margin:0 0 6px 0;display:inline-block}
+@media (max-width:520px){.qa{display:none}}
+
+/* ── Page footer ─────────────────────────────────────────── */
+.ftr{text-align:center;font-size:11px;color:#666;padding:16px 0 64px;opacity:.55;font-family:var(--body)}
+
 .mod-bg{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto}
 .mod-bg.show{display:flex}
 .mod{background:var(--panel);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:420px;padding:18px 20px 16px;box-shadow:0 20px 60px #000a;animation:popIn .2s ease}
@@ -303,6 +326,17 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   </form>
 </div>
 
+
+<!-- Floating quick-add bar (placed before scripts so JS can attach listeners) -->
+<form id="qaForm" class="qa" autocomplete="off">
+  <span id="qaStatus" class="qa-status"></span>
+  <input id="qaCmd" placeholder="quick add — e.g. 145 3 1.20" />
+  <button type="button" id="qaPipBtn" class="qa-pip-btn" title="Pop out (overlay the game)" hidden>⧉</button>
+</form>
+
+<footer class="ftr">
+  v<span id="appVer">1.0.0</span> · built <span id="appBuilt">2026-05-11</span>
+</footer>
 
 <!--
   CONFIGURATION — fill in your Supabase project URL and anon key.
@@ -447,6 +481,8 @@ function rowToEntry(row) {
 function getState(e, now) {
   if (e.snapshots && e.snapshots.length > 0) {
     if (e.snapshots[e.snapshots.length - 1].phase >= 5) return { s: 'spawn', rem: null, pct: 1 };
+    var phS = estimatePhase(e, now);
+    if (phS !== null && phS >= 5) return { s: 'spawn', rem: null, pct: 1 };
     return { s: 'p1', rem: null, pct: 1 };
   }
   if (!e.killTime || !e.durationMs) {
@@ -456,12 +492,14 @@ function getState(e, now) {
   var elapsed = now - e.killTime;
   var rem     = e.durationMs - elapsed;
   var pct     = Math.min(1, elapsed / e.durationMs);
-  var s;
-  if      (e.missing)         s = 'miss';
-  else if (rem > 0)           s = 'wait';   // 'soon' merged into 'wait' — single waiting category
-  else if (rem > -20 * 60000) s = 'p1';
-  else                        s = 'late';
-  return { s: s, rem: rem, pct: pct };
+  if (e.missing)    return { s: 'miss', rem: rem, pct: pct };
+  if (rem > 0)      return { s: 'wait', rem: rem, pct: pct };
+  // Countdown expired — auto-transition to RESPAWNED once estimated phase reaches 5,
+  // so the user no longer needs to click the respawn button manually.
+  var phK = estimatePhase(e, now);
+  if (phK !== null && phK >= 5) return { s: 'spawn', rem: rem, pct: 1 };
+  if (rem > -20 * 60000)        return { s: 'p1',    rem: rem, pct: pct };
+  return                                 { s: 'late', rem: rem, pct: pct };
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -1362,6 +1400,84 @@ document.getElementById('addForm').addEventListener('submit', async function(ev)
   }
   btn.disabled = false;
 });
+
+// ── Floating quick-add submit (mirrors the modal handler) ──────
+document.getElementById('qaForm').addEventListener('submit', async function(ev){
+  ev.preventDefault();
+  var formEl = ev.currentTarget;
+  var input  = formEl.querySelector('#qaCmd');
+  var stat   = formEl.querySelector('#qaStatus');
+  if (!input || !stat) return;
+  var p = parseAddCmd(input.value);
+  if (p.error) { stat.className = 'qa-status err'; stat.textContent = p.error; return; }
+  input.disabled = true;
+  stat.className = 'qa-status'; stat.textContent = 'Saving…';
+  try {
+    var nick = ensureNick();
+    if (p.kind === 'kill') await commitKill(p.level, p.ch, p.durationMs, nick);
+    else                   await commitSnapshot(p.level, p.ch, p.phase, nick);
+    stat.className = 'qa-status ok'; stat.textContent = 'Saved ✓';
+    input.value = '';
+    setTimeout(function(){ stat.textContent = ''; stat.className = 'qa-status'; }, 1800);
+  } catch (e) {
+    stat.className = 'qa-status err'; stat.textContent = 'Error: ' + e.message;
+  }
+  input.disabled = false;
+  input.focus();
+});
+
+// ── Pop-out quick-add into Document Picture-in-Picture ──────────
+(function initQuickAddPip(){
+  var btn = document.getElementById('qaPipBtn');
+  if (!btn) return;
+  if (!('documentPictureInPicture' in window)) return;
+  btn.hidden = false;
+
+  var form = document.getElementById('qaForm');
+  var placeholder = null;
+  var pipWin = null;
+
+  // Self-contained CSS so PiP doesn't depend on copying the parent's styles.
+  var PIP_CSS = [
+    'html,body{margin:0;padding:0;height:100%;background:#12141a;font-family:system-ui,-apple-system,Segoe UI,sans-serif}',
+    '#qaForm{display:flex;align-items:center;gap:8px;padding:14px;height:100%;box-sizing:border-box;position:static;width:100%}',
+    '#qaCmd{flex:1;background:#0d0f1a;border:1px solid #353860;color:#f0ead8;border-radius:6px;padding:8px 10px;font-family:monospace;font-size:13px;outline:none}',
+    '#qaCmd:focus{border-color:#c9a84c}',
+    '#qaCmd::placeholder{color:#555070}',
+    '#qaCmd:disabled{opacity:.5}',
+    '#qaStatus{font-size:11px;min-width:62px;color:#9890b8;white-space:nowrap}',
+    '#qaStatus.ok{color:#6fdf99}',
+    '#qaStatus.err{color:#d45868}',
+    '#qaStatus:empty{display:none}',
+    '#qaPipBtn{display:none}',
+  ].join('\n');
+
+  async function popOut(){
+    if (pipWin) { pipWin.focus(); return; }
+    pipWin = await documentPictureInPicture.requestWindow({ width: 360, height: 72 });
+
+    var style = pipWin.document.createElement('style');
+    style.textContent = PIP_CSS;
+    pipWin.document.head.appendChild(style);
+
+    placeholder = document.createComment('qaForm-pip-placeholder');
+    form.parentNode.insertBefore(placeholder, form);
+    pipWin.document.body.appendChild(form);
+
+    var input = pipWin.document.getElementById('qaCmd');
+    if (input) input.focus();
+
+    pipWin.addEventListener('pagehide', function(){
+      if (placeholder && placeholder.parentNode) {
+        placeholder.parentNode.replaceChild(form, placeholder);
+      }
+      placeholder = null;
+      pipWin = null;
+    });
+  }
+
+  btn.addEventListener('click', popOut);
+})();
 
 // ── Per-card inline edit / actions ───────────────────────────
 function closeCardMenu(){}   // legacy no-op (kept for ESC handler)
