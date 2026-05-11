@@ -245,6 +245,11 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .card-act:hover{border-color:var(--col-p1);color:var(--col-p1)}
 .card-act.respawn{flex:0 0 auto;padding:6px 12px;color:var(--gold);border-color:#3a2c0e}
 .card-act.respawn:hover{background:#c9a84c18;border-color:var(--gold);box-shadow:0 0 10px #c9a84c44}
+@keyframes cardAlertPulse{
+  0%,100%{box-shadow:0 0 0 0 transparent;outline-color:transparent}
+  20%,80%{box-shadow:0 0 28px 6px rgba(201,168,76,.55);outline-color:var(--gold)}
+}
+.card.alerting{outline:2px solid transparent;outline-offset:2px;animation:cardAlertPulse 1.1s ease-in-out 4}
 .card-snap-form{flex:1;display:flex;margin:0}
 .card-snap-in{flex:1;width:100%;font-family:var(--mono);font-size:11px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);outline:none;transition:border-color .15s}
 .card-snap-in::placeholder{color:var(--muted2)}
@@ -404,9 +409,9 @@ function checkTransition(id, newState) {
   var prev = prevStates[id];
   prevStates[id] = newState;
   if (!prev || prev === newState) return;
-  if      (newState === 'soon')  beep(SOUND_SOON);
-  else if (newState === 'p1')    beep(SOUND_P1);
-  else if (newState === 'spawn') { beep(SOUND_SPAWN); autoFocusSpawn(); }
+  if      (newState === 'soon')  { beep(SOUND_SOON);  markAlerting(id); }
+  else if (newState === 'p1')    { beep(SOUND_P1);    markAlerting(id); }
+  else if (newState === 'spawn') { beep(SOUND_SPAWN); autoFocusSpawn(); markAlerting(id); }
 }
 
 // When any card freshly transitions to spawn, auto-switch the filter to
@@ -420,13 +425,32 @@ function autoFocusSpawn() {
   renderAll();
 }
 
+// Flash + scroll the specific card that just triggered an alert so the
+// user can see which boss made the sound. Tries again next frame to
+// handle the autoFocusSpawn() → renderAll() DOM rebuild path.
+function markAlerting(id) {
+  function apply() {
+    var card = document.querySelector('.card[data-id="' + id + '"]');
+    if (!card) return false;
+    card.classList.remove('alerting');
+    void card.offsetWidth;  // force reflow so the animation restarts
+    card.classList.add('alerting');
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+    setTimeout(function(){ card.classList.remove('alerting'); }, 5000);
+    return true;
+  }
+  if (!apply()) requestAnimationFrame(apply);
+}
+
 function checkPhaseAlert(id, currentPhase) {
   if (currentPhase === null) return;
   var prev = prevPhases[id];
   prevPhases[id] = currentPhase;
   if (prev === undefined) return;
   // Crossing 4.0 (but not jumping straight to spawn) → P4 alert
-  if (prev < 4.0 && currentPhase >= 4.0 && currentPhase < 5.0) beep(SOUND_P4);
+  if (prev < 4.0 && currentPhase >= 4.0 && currentPhase < 5.0) {
+    beep(SOUND_P4); markAlerting(id);
+  }
 }
 
 document.getElementById('sndBtn').addEventListener('click', function() {
