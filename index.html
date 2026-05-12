@@ -197,10 +197,17 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 
 /* ── Page footer ─────────────────────────────────────────── */
 .ftr{text-align:center;font-size:11px;color:#666;padding:16px 0 64px;opacity:.55;font-family:var(--body)}
-.ftr-row + .ftr-row{margin-top:4px;opacity:.85;font-size:11px}
-#ftrLast{color:var(--soft);font-family:var(--mono)}
-#ftrLast .a{color:var(--gold)}
-#ftrLast .k{color:var(--cream)}
+
+/* ── Activity log modal ──────────────────────────────────── */
+.log-mod{max-width:560px}
+.log-list{max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:12px}
+.log-row{padding:8px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--soft);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.log-row .msg{flex:1;min-width:0}
+.log-row .a{color:var(--gold)}
+.log-row .k{color:var(--cream)}
+.log-row .t{color:var(--muted);font-size:10px;white-space:nowrap}
+.log-row.auto{opacity:.75}
+.log-empty{padding:20px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px}
 
 .mod-bg{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto}
 .mod-bg.show{display:flex}
@@ -290,6 +297,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
     <button class="fb" data-f="spawn">🔥 Boss Respawn <span class="fbc" id="fc-spawn"></span></button>
     <button class="ins-btn" id="sortBtn" title="Toggle sort (Soonest / Channel / Stable)">⇅ Soonest</button>
     <button class="ins-btn" id="insBtn">📊 Insights</button>
+    <button class="ins-btn" id="logBtn" title="Activity log — who did what">📋 Log</button>
     <button class="add-btn" id="addBtn" title="Add or edit boss data">+ Add</button>
     <button class="clr-btn" id="clrBtn" title="Delete ALL tracked bosses">🗑 Clear All</button>
     <input class="srch" id="srch" placeholder="Search level / channel…"/>
@@ -335,6 +343,16 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
   </form>
 </div>
 
+<div class="mod-bg" id="logBg">
+  <div class="mod log-mod" role="dialog" aria-modal="true">
+    <div class="mod-h">
+      <div class="mod-t">ACTIVITY LOG</div>
+      <button type="button" class="mod-x" id="logX" title="Close">✕</button>
+    </div>
+    <div class="log-list" id="logList"><div class="log-empty">Loading…</div></div>
+  </div>
+</div>
+
 
 <!-- Floating quick-add bar (placed before scripts so JS can attach listeners) -->
 <form id="qaForm" class="qa" autocomplete="off">
@@ -344,8 +362,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 </form>
 
 <footer class="ftr">
-  <div class="ftr-row">v<span id="appVer">1.0.1</span> · built <span id="appBuilt">2026-05-12</span></div>
-  <div class="ftr-row" id="ftrLast"></div>
+  v<span id="appVer">1.0.2</span> · built <span id="appBuilt">2026-05-12</span>
 </footer>
 
 <!--
@@ -1760,8 +1777,10 @@ sb.channel('insights-live')
       })
   .subscribe();
 
-// ── Activity footer: render most-recent audit row ─────────────
-var lastAudit = null;
+// ── Activity log modal ───────────────────────────────────────
+var auditHistory = [];          // newest first, capped at AUDIT_CAP
+var AUDIT_CAP    = 50;
+var logTickIv    = null;
 
 function relTime(ts) {
   var d = Math.max(0, Date.now() - ts);
@@ -1771,7 +1790,7 @@ function relTime(ts) {
   return Math.floor(d / 86400000) + ' d ago';
 }
 
-function fmtAudit(r) {
+function fmtAuditMsg(r) {
   var who = r.actor ? '@' + r.actor : (r.action === 'auto' ? 'auto' : 'someone');
   var where = (r.level ? 'LV' + r.level : '') + (r.channel ? ' CH' + r.channel : '');
   var verb;
@@ -1784,36 +1803,61 @@ function fmtAudit(r) {
     case 'auto':      verb = 'auto-deleted'; break;
     default:          verb = r.action;
   }
-  var when = relTime(new Date(r.created_at).getTime());
   return '<span class="a">' + esc(who) + '</span> '
        + '<span class="k">' + esc(verb) + '</span>'
-       + (where ? ' ' + esc(where) : '')
-       + ' · ' + esc(when);
+       + (where ? ' ' + esc(where) : '');
 }
 
-function renderLastAudit() {
-  var el = document.getElementById('ftrLast');
+function renderAuditList() {
+  var el = document.getElementById('logList');
   if (!el) return;
-  el.innerHTML = lastAudit ? fmtAudit(lastAudit) : '';
+  if (!auditHistory.length) { el.innerHTML = '<div class="log-empty">No activity yet.</div>'; return; }
+  var html = '';
+  for (var i = 0; i < auditHistory.length; i++) {
+    var r = auditHistory[i];
+    var cls = 'log-row' + (r.action === 'auto' ? ' auto' : '');
+    var when = relTime(new Date(r.created_at).getTime());
+    html += '<div class="' + cls + '">'
+          +   '<span class="msg">' + fmtAuditMsg(r) + '</span>'
+          +   '<span class="t">' + esc(when) + '</span>'
+          + '</div>';
+  }
+  el.innerHTML = html;
 }
 
-async function loadLastAudit() {
+async function loadAuditHistory() {
   var { data, error } = await sb.from('boss_audit')
-    .select('*').order('created_at', { ascending: false }).limit(1);
+    .select('*').order('created_at', { ascending: false }).limit(AUDIT_CAP);
   if (error) { console.warn('[audit] load failed', error); return; }
-  if (data && data[0]) { lastAudit = data[0]; renderLastAudit(); }
+  auditHistory = data || [];
+  renderAuditList();
 }
 
 sb.channel('audit-live')
   .on('postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'boss_audit' },
       function(payload){
-        lastAudit = payload.new;
-        renderLastAudit();
+        auditHistory.unshift(payload.new);
+        if (auditHistory.length > AUDIT_CAP) auditHistory.length = AUDIT_CAP;
+        if (logBg.classList.contains('show')) renderAuditList();
       })
   .subscribe();
 
-setInterval(renderLastAudit, 30000);
+var logBg = document.getElementById('logBg');
+function openLog()  {
+  logBg.classList.add('show');
+  loadAuditHistory();
+  if (!logTickIv) logTickIv = setInterval(function(){
+    if (logBg.classList.contains('show')) renderAuditList();
+  }, 30000);
+}
+function closeLog() { logBg.classList.remove('show'); }
+document.getElementById('logBtn').addEventListener('click', openLog);
+document.getElementById('logX').addEventListener('click', closeLog);
+logBg.addEventListener('click', function(ev){ if (ev.target === logBg) closeLog(); });
+document.addEventListener('keydown', function(ev){
+  if (ev.key === 'Escape' && logBg.classList.contains('show')) closeLog();
+});
 
 // Boot
 (async function boot(){
@@ -1821,7 +1865,6 @@ setInterval(renderLastAudit, 30000);
   await migrateLegacySamples();
   await loadSamples();    // re-fetch in case migration added rows
   await loadAll();        // existing entry loader; calls rebuildKnowledge internally
-  loadLastAudit();
   startTick();
 })();
 </script>
