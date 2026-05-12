@@ -434,7 +434,37 @@ function checkTransition(id, newState) {
   if (!prev || prev === newState) return;
   if      (newState === 'soon')  { beep(SOUND_SOON);  markAlerting(id); }
   else if (newState === 'p1')    { beep(SOUND_P1);    markAlerting(id); }
-  else if (newState === 'spawn') { beep(SOUND_SPAWN); markAlerting(id); }
+  else if (newState === 'spawn') { beep(SOUND_SPAWN); markAlerting(id); maybeAutoSnapRespawn(id); }
+}
+
+// When state freshly flips to 'spawn' via the phase estimate (no real
+// respawn snapshot yet), insert a phase-5 snapshot so the bot's 9-min
+// auto-cleanup countdown can start. Skip if a phase-5 snapshot already
+// exists in this cycle.
+function maybeAutoSnapRespawn(id) {
+  var e = entries[id];
+  if (!e) return;
+  var snaps = e.snapshots || [];
+  for (var i = 0; i < snaps.length; i++) {
+    if ((snaps[i].phase || 0) >= 5) return;
+  }
+  var now = Date.now();
+  var newSnaps = snaps.concat([{ phase: 5.0, time: now }]);
+  var payload = {
+    id: e.id,
+    level: String(e.level),
+    channel: String(e.channel),
+    snapshots: newSnaps,
+    kill_time: e.killTime || 0,
+    duration_ms: e.durationMs || 0,
+    created_at: e.createdAt || now,
+    missing: !!e.missing,
+    note: 'auto-respawn (estimate ≥ 5.0)',
+    synced_at: now,
+  };
+  sb.from('boss_entries').upsert(payload).then(function(r){
+    if (r.error) console.warn('[auto-snap] upsert failed', r.error);
+  });
 }
 
 // When any card freshly transitions to spawn, auto-switch the filter to
