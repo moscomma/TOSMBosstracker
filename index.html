@@ -197,6 +197,10 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 
 /* ── Page footer ─────────────────────────────────────────── */
 .ftr{text-align:center;font-size:11px;color:#666;padding:16px 0 64px;opacity:.55;font-family:var(--body)}
+.ftr-row + .ftr-row{margin-top:4px;opacity:.85;font-size:11px}
+#ftrLast{color:var(--soft);font-family:var(--mono)}
+#ftrLast .a{color:var(--gold)}
+#ftrLast .k{color:var(--cream)}
 
 .mod-bg{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto}
 .mod-bg.show{display:flex}
@@ -340,7 +344,8 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 </form>
 
 <footer class="ftr">
-  v<span id="appVer">1.0.0</span> · built <span id="appBuilt">2026-05-11</span>
+  <div class="ftr-row">v<span id="appVer">1.0.1</span> · built <span id="appBuilt">2026-05-12</span></div>
+  <div class="ftr-row" id="ftrLast"></div>
 </footer>
 
 <!--
@@ -367,6 +372,7 @@ var audioCtx   = null;
 var insOpen    = false;
 var sortBy     = 'soonest';   // 'soonest' | 'channel' | 'stable' — default is most-urgent first
 var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
+var locallyDeleted = {};   // id -> Date.now() of when this client issued the delete
 var volume     = 0.5;
 var prevPhases = {};   // { entryId: lastEstimatedPhase } — for phase-4 alert
 
@@ -1242,7 +1248,18 @@ async function loadAll() {
 sb.channel('boss-live')
   .on('postgres_changes', { event: '*', schema: 'public', table: 'boss_entries' }, function(payload){
     if (payload.eventType === 'DELETE') {
-      delete entries[payload.old.id];
+      var delId = payload.old.id;
+      var local = locallyDeleted[delId];
+      if (local && Date.now() - local < 10000) {
+        delete locallyDeleted[delId];
+      } else {
+        logAudit('auto', payload.old.level, payload.old.channel, { reason: 'external' });
+      }
+      // GC stale locallyDeleted entries
+      Object.keys(locallyDeleted).forEach(function(k){
+        if (Date.now() - locallyDeleted[k] > 30000) delete locallyDeleted[k];
+      });
+      delete entries[delId];
     } else {
       var e = rowToEntry(payload.new);
       entries[e.id] = e;
@@ -1332,6 +1349,20 @@ function parseValueOnly(val, lv, ch) {
   return { error: 'Unknown value: "' + val + '"' };
 }
 
+// ── Activity log ─────────────────────────────────────────────
+function logAudit(action, level, channel, details) {
+  var row = {
+    action:  action,
+    level:   level   != null ? String(level)   : null,
+    channel: channel != null ? String(channel) : null,
+    actor:   nickname || null,
+    details: details || null,
+  };
+  sb.from('boss_audit').insert(row).then(function(r){
+    if (r.error) console.warn('[audit] insert failed', r.error);
+  });
+}
+
 // ── Commit helpers (shared by modal + card menu) ─────────────
 async function commitKill(level, ch, durationMs, nick) {
   if (durationMs < 60000 || durationMs > 12 * 3600000) {
@@ -1346,6 +1377,7 @@ async function commitKill(level, ch, durationMs, nick) {
     created_at: now, missing: false, synced_at: now,
   });
   if (error) throw new Error(error.message);
+  logAudit('add', level, ch, { durationMs: durationMs });
 }
 
 async function commitSnapshot(level, ch, phase, nick) {
@@ -1372,6 +1404,7 @@ async function commitSnapshot(level, ch, phase, nick) {
   }
   var { error } = await sb.from('boss_entries').upsert(payload);
   if (error) throw new Error(error.message);
+  logAudit('phase', level, ch, { phase: rounded });
   // Persist sample for cross-cycle learning
   if (snaps.length >= 2) persistLatestSample(String(level), snaps, entryId(level, ch));
 }
@@ -1395,8 +1428,11 @@ document.getElementById('clrBtn').addEventListener('click', async function(){
   }
   try {
     var nick = ensureNick();
+    var nowTs = Date.now();
+    ids.forEach(function(id){ locallyDeleted[id] = nowTs; });
     var { error } = await sb.from('boss_entries').delete().neq('id', '');
     if (error) return alert('Error: ' + error.message);
+    logAudit('clear_all', null, null, { count: ids.length });
     console.log('[viewer] Cleared all by @' + nick);
   } catch (err) {
     alert('Error: ' + err.message);
@@ -1596,8 +1632,10 @@ async function handleCardAction(act, id) {
       await moveEntry(e, newLv, ch, nick);
     } else if (act === 'del') {
       if (!confirm('Delete LV' + e.level + ' CH' + e.channel + '?')) return;
+      locallyDeleted[id] = Date.now();
       var { error: derr } = await sb.from('boss_entries').delete().eq('id', id);
-      if (derr) alert('Error: ' + derr.message);
+      if (derr) { alert('Error: ' + derr.message); return; }
+      logAudit('delete', e.level, e.channel, null);
     }
   } catch (err) {
     alert('Error: ' + err.message);
@@ -1615,9 +1653,11 @@ async function moveEntry(e, newLv, newCh, nick) {
   });
   if (ue) return alert('Error: ' + ue.message);
   if (newId !== e.id) {
+    locallyDeleted[e.id] = Date.now();
     var { error: de } = await sb.from('boss_entries').delete().eq('id', e.id);
-    if (de) alert('Move done but old delete failed: ' + de.message);
+    if (de) { alert('Move done but old delete failed: ' + de.message); return; }
   }
+  logAudit('move', e.level, e.channel, { toLv: newLv, toCh: newCh });
 }
 
 // ── Persisted phase samples (Supabase-backed; shared across browsers) ──
@@ -1720,12 +1760,68 @@ sb.channel('insights-live')
       })
   .subscribe();
 
+// ── Activity footer: render most-recent audit row ─────────────
+var lastAudit = null;
+
+function relTime(ts) {
+  var d = Math.max(0, Date.now() - ts);
+  if (d < 60000)    return 'just now';
+  if (d < 3600000)  return Math.floor(d / 60000)   + ' min ago';
+  if (d < 86400000) return Math.floor(d / 3600000) + ' h ago';
+  return Math.floor(d / 86400000) + ' d ago';
+}
+
+function fmtAudit(r) {
+  var who = r.actor ? '@' + r.actor : (r.action === 'auto' ? 'auto' : 'someone');
+  var where = (r.level ? 'LV' + r.level : '') + (r.channel ? ' CH' + r.channel : '');
+  var verb;
+  switch (r.action) {
+    case 'add':       verb = 'added';   break;
+    case 'phase':     verb = 'set phase ' + (r.details && r.details.phase != null ? r.details.phase : '?'); break;
+    case 'move':      verb = 'moved' + (r.details && r.details.toLv ? ' → LV' + r.details.toLv + ' CH' + r.details.toCh : ''); break;
+    case 'delete':    verb = 'deleted'; break;
+    case 'clear_all': verb = 'cleared all (' + (r.details && r.details.count) + ')'; where = ''; break;
+    case 'auto':      verb = 'auto-deleted'; break;
+    default:          verb = r.action;
+  }
+  var when = relTime(new Date(r.created_at).getTime());
+  return '<span class="a">' + esc(who) + '</span> '
+       + '<span class="k">' + esc(verb) + '</span>'
+       + (where ? ' ' + esc(where) : '')
+       + ' · ' + esc(when);
+}
+
+function renderLastAudit() {
+  var el = document.getElementById('ftrLast');
+  if (!el) return;
+  el.innerHTML = lastAudit ? fmtAudit(lastAudit) : '';
+}
+
+async function loadLastAudit() {
+  var { data, error } = await sb.from('boss_audit')
+    .select('*').order('created_at', { ascending: false }).limit(1);
+  if (error) { console.warn('[audit] load failed', error); return; }
+  if (data && data[0]) { lastAudit = data[0]; renderLastAudit(); }
+}
+
+sb.channel('audit-live')
+  .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'boss_audit' },
+      function(payload){
+        lastAudit = payload.new;
+        renderLastAudit();
+      })
+  .subscribe();
+
+setInterval(renderLastAudit, 30000);
+
 // Boot
 (async function boot(){
   await loadSamples();
   await migrateLegacySamples();
   await loadSamples();    // re-fetch in case migration added rows
   await loadAll();        // existing entry loader; calls rebuildKnowledge internally
+  loadLastAudit();
   startTick();
 })();
 </script>
