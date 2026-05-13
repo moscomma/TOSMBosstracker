@@ -362,7 +362,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 </form>
 
 <footer class="ftr">
-  v<span id="appVer">1.0.2</span> · built <span id="appBuilt">2026-05-12</span>
+  v<span id="appVer">1.0.3</span> · built <span id="appBuilt">2026-05-13</span>
 </footer>
 
 <!--
@@ -1207,6 +1207,50 @@ function renderInsights() {
       walkT += dt; walkPh = segEnd;
     }
 
+    // Observed per-segment durations (empirical history, pooled across channels)
+    var segObs = [1, 2, 3, 4].map(function(seg){
+      var ss = samples.filter(function(s){ return s.seg === seg && s.spd > 0; });
+      if (ss.length < 2) return null;
+      var totalW = 0, sum = 0;
+      ss.forEach(function(s){
+        var dw = s.w * decayWeight(s.ts, now);
+        totalW += dw;
+        sum    += (1 / s.spd) * dw;
+      });
+      if (totalW <= 0) return null;
+      return { label: 'P'+seg+'→P'+(seg+1), avgMs: sum / totalW, n: ss.length };
+    }).filter(Boolean);
+    var obsLine = segObs.length
+      ? segObs.map(function(o){ return o.label + ': ' + fmtMin(o.avgMs); }).join(' · ')
+      : null;
+
+    // Time-of-day breakdown: fastest / slowest hour bucket
+    var bucketAgg = {};
+    samples.forEach(function(s){
+      if (!s.hb) return;
+      if (!bucketAgg[s.hb]) bucketAgg[s.hb] = { totalW: 0, sum: 0, n: 0 };
+      var dw = s.w * decayWeight(s.ts, now);
+      bucketAgg[s.hb].totalW += dw;
+      bucketAgg[s.hb].sum    += s.spd * dw;
+      bucketAgg[s.hb].n++;
+    });
+    var bucketArr = Object.keys(bucketAgg)
+      .filter(function(k){ return bucketAgg[k].n >= 2 && bucketAgg[k].totalW > 0; })
+      .map(function(k){ return { hb: k, avg: bucketAgg[k].sum / bucketAgg[k].totalW, n: bucketAgg[k].n }; })
+      .sort(function(a, b){ return b.avg - a.avg; });
+    var bucketLine = null;
+    if (bucketArr.length >= 1) {
+      var fast = bucketArr[0];
+      var fastStr = BUCKET_LABEL[fast.hb] + ' (' + (fast.avg / DEFAULT_PHASE_SPEED).toFixed(2) + '× · ' + fast.n + ')';
+      if (bucketArr.length >= 2) {
+        var slow = bucketArr[bucketArr.length - 1];
+        var slowStr = BUCKET_LABEL[slow.hb] + ' (' + (slow.avg / DEFAULT_PHASE_SPEED).toFixed(2) + '× · ' + slow.n + ')';
+        bucketLine = 'Fast: ' + fastStr + ' · Slow: ' + slowStr;
+      } else {
+        bucketLine = 'Fast: ' + fastStr;
+      }
+    }
+
     // Per-channel rows: phase + spawn ETA
     var chRows = es.map(function(e){
       var ph = estimatePhase(e, now);
@@ -1233,6 +1277,8 @@ function renderInsights() {
         '<div class="ins-row"><span>Rate</span><span class="ins-val">'+rateLine+'</span></div>',
         '<div class="ins-row"><span>Confidence</span><span class="ins-val '+conf.cls+'">'+conf.label+' ('+conf.n+')</span></div>',
         segLines.length ? '<div class="ins-segs">'+segLines.map(function(l){return '<span class="ins-seg">'+l+'</span>';}).join('')+'</div>' : '',
+        obsLine    ? '<div class="ins-row"><span>Observed</span><span class="ins-val">'+esc(obsLine)+'</span></div>'    : '',
+        bucketLine ? '<div class="ins-row"><span>Best time</span><span class="ins-val">'+esc(bucketLine)+'</span></div>' : '',
         chRows ? '<div class="ins-ch-list">'+chRows+'</div>' : '',
       '</div>',
     ].join('');
