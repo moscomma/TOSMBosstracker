@@ -22,25 +22,35 @@
 <body>
   <form class="box" id="f" autocomplete="off">
     <h1>ToS Boss Tracker</h1>
-    <div class="sub">Enter password to continue</div>
-    <input type="password" id="pw" placeholder="password" autofocus required>
+    <div class="sub">Enter your name and password</div>
+    <input type="text" id="nm" placeholder="your name" maxlength="20" autofocus required>
+    <input type="password" id="pw" placeholder="password" required>
     <button type="submit" id="b">Unlock</button>
     <div class="err" id="e"></div>
   </form>
 <script>
   var f = document.getElementById('f'), pw = document.getElementById('pw'),
+      nm = document.getElementById('nm'),
       b = document.getElementById('b'), e = document.getElementById('e');
   f.addEventListener('submit', async function(ev){
     ev.preventDefault();
+    var name = nm.value.trim().slice(0, 20);
+    if (!name) { e.textContent = 'Name required'; nm.focus(); return; }
     e.textContent = ''; b.disabled = true; b.textContent = '...';
     try {
       var r = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pw.value }),
+        body: JSON.stringify({ password: pw.value, name: name }),
       });
-      if (r.ok) { location.href = '/'; return; }
-      e.textContent = 'Wrong password';
+      if (r.ok) {
+        try { localStorage.setItem('tosm_nick', name); } catch(_) {}
+        location.href = '/';
+        return;
+      }
+      var msg = 'Wrong password';
+      try { var j = await r.json(); if (j && j.error) msg = j.error; } catch(_) {}
+      e.textContent = msg;
     } catch (err) { e.textContent = 'Error: ' + err.message; }
     b.disabled = false; b.textContent = 'Unlock'; pw.select();
   });

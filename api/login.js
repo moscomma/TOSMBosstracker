@@ -8,9 +8,10 @@ export default async function handler(req, res) {
     try { body = JSON.parse(body); } catch { body = {}; }
   }
   const password = body && body.password;
-  const expected = process.env.ANIMA_PASSWORD;
-  if (!expected) {
-    return res.status(500).json({ ok: false, error: 'Server password not configured' });
+  const name = (body && body.name || '').trim().slice(0, 20);
+  const expected = 'DPUGBIF';
+  if (!name) {
+    return res.status(400).json({ ok: false, error: 'Name required' });
   }
   if (password !== expected) {
     return res.status(401).json({ ok: false, error: 'Wrong password' });

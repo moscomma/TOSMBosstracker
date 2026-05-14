@@ -11,10 +11,7 @@ export default function middleware(request) {
     return;
   }
 
-  const expected = process.env.ANIMA_PASSWORD;
-  if (!expected) {
-    return new Response('Server password not configured (set ANIMA_PASSWORD env var in Vercel)', { status: 500 });
-  }
+  const expected = 'DPUGBIF';
 
   const cookieHeader = request.headers.get('cookie') || '';
   const match = cookieHeader.match(/(?:^|;\s*)tosm_auth=([^;]+)/);
