@@ -362,7 +362,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 </form>
 
 <footer class="ftr">
-  v<span id="appVer">1.0.4</span> · built <span id="appBuilt">2026-05-14</span>
+  v<span id="appVer">1.0.5</span> · built <span id="appBuilt">2026-05-16</span>
 </footer>
 
 <!--
@@ -522,6 +522,28 @@ function unlockAudio() {
 }
 document.addEventListener('click',   unlockAudio, true);
 document.addEventListener('keydown', unlockAudio, true);
+
+// Re-alert for spawns that happened while tab was hidden.
+// Browsers suspend AudioContext in background tabs, so beep() runs silently;
+// prevStates is already 'spawn' when the user returns, so checkTransition
+// never re-fires. This catches those missed alerts.
+var _hiddenStates = {};
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') {
+    _hiddenStates = Object.assign({}, prevStates);
+  } else {
+    var ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    var missed = Object.keys(prevStates).filter(function(id) {
+      return prevStates[id] === 'spawn' && _hiddenStates[id] !== 'spawn';
+    });
+    if (missed.length && soundOn) {
+      beep(SOUND_SPAWN);
+      missed.forEach(function(id) { markAlerting(id); });
+    }
+    _hiddenStates = {};
+  }
+});
 
 // Volume slider — persists across sessions
 (function initVolume(){
