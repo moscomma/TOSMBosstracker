@@ -362,7 +362,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 </form>
 
 <footer class="ftr">
-  v<span id="appVer">1.0.5</span> · built <span id="appBuilt">2026-05-16</span>
+  v<span id="appVer">1.0.6</span> · built <span id="appBuilt">2026-05-16</span>
 </footer>
 
 <!--
@@ -1368,7 +1368,7 @@ sb.channel('boss-live')
       if (local && Date.now() - local < 10000) {
         delete locallyDeleted[delId];
       } else {
-        logAudit('auto', payload.old.level, payload.old.channel, { reason: 'external' });
+        logAudit('auto', payload.old.level, payload.old.channel, { reason: 'external' }, 'bot');
       }
       // GC stale locallyDeleted entries
       Object.keys(locallyDeleted).forEach(function(k){
@@ -1465,12 +1465,12 @@ function parseValueOnly(val, lv, ch) {
 }
 
 // ── Activity log ─────────────────────────────────────────────
-function logAudit(action, level, channel, details) {
+function logAudit(action, level, channel, details, actorOverride) {
   var row = {
     action:  action,
     level:   level   != null ? String(level)   : null,
     channel: channel != null ? String(channel) : null,
-    actor:   nickname || null,
+    actor:   actorOverride !== undefined ? actorOverride : (nickname || null),
     details: details || null,
   };
   sb.from('boss_audit').insert(row).then(function(r){
@@ -1889,7 +1889,14 @@ function relTime(ts) {
 }
 
 function fmtAuditMsg(r) {
-  var who = r.actor ? '@' + r.actor : (r.action === 'auto' ? 'auto' : 'someone');
+  var who;
+  if (r.actor === 'bot') {
+    who = '🤖 bot';
+  } else if (r.actor) {
+    who = '@' + r.actor;
+  } else {
+    who = r.action === 'auto' ? '🤖 bot' : 'someone';
+  }
   var where = (r.level ? 'LV' + r.level : '') + (r.channel ? ' CH' + r.channel : '');
   var verb;
   switch (r.action) {
