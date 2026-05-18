@@ -1415,35 +1415,10 @@ sb.channel('boss-live')
   .on('postgres_changes', { event: '*', schema: 'public', table: 'boss_entries' }, function(payload){
     if (payload.eventType === 'DELETE') {
       var delId = payload.old.id;
-      // Extract level/channel: prefer local cache (still present at this moment),
-      // fall back to parsing the id format "dc_LEVEL_CHANNEL".
-      var cached = entries[delId];
-      var idParts = delId.replace(/^dc_/, '').split('_');
-      var delLv  = cached ? String(cached.level)   : (idParts[0] || null);
-      var delCh  = cached ? String(cached.channel) : (idParts[1] || null);
-
-      var local = locallyDeleted[delId];
-      if (local && Date.now() - local < 10000) {
-        // This browser initiated the delete — already logged via logAudit('delete').
-        delete locallyDeleted[delId];
-      } else {
-        // Could be bot or another user's browser. Wait 800 ms to let the
-        // 'delete' audit row (logged by the deleter's browser) arrive via
-        // audit-live. If it shows up first, skip to avoid duplicate.
-        var snapLv = delLv, snapCh = delCh;
-        setTimeout(function() {
-          var cutoff = Date.now() - 5000;
-          var alreadyLogged = auditHistory.some(function(r) {
-            return r.action === 'delete'
-              && String(r.level) === String(snapLv)
-              && String(r.channel) === String(snapCh)
-              && new Date(r.created_at).getTime() > cutoff;
-          });
-          if (!alreadyLogged) {
-            logAudit('auto', snapLv, snapCh, { reason: 'bot' }, 'bot');
-          }
-        }, 800);
-      }
+      // Audit logging is done by whoever performed the delete — this browser for
+      // a manual delete, the bot for auto/Discord deletes. Never log from this
+      // realtime echo, or every open browser would log the same delete.
+      delete locallyDeleted[delId];
       // GC stale locallyDeleted entries
       Object.keys(locallyDeleted).forEach(function(k){
         if (Date.now() - locallyDeleted[k] > 30000) delete locallyDeleted[k];
