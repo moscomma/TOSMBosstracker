@@ -450,20 +450,14 @@ function maybeAutoSnapRespawn(id) {
   }
   var now = Date.now();
   var newSnaps = snaps.concat([{ phase: 5.0, time: now }]);
-  var payload = {
-    id: e.id,
-    level: String(e.level),
-    channel: String(e.channel),
+  // update (not upsert): if this entry was deleted elsewhere, it must stay
+  // deleted — upsert would re-insert the row and resurrect it.
+  sb.from('boss_entries').update({
     snapshots: newSnaps,
-    kill_time: e.killTime || 0,
-    duration_ms: e.durationMs || 0,
-    created_at: e.createdAt || now,
-    missing: !!e.missing,
     note: 'auto-respawn (estimate ≥ 5.0)',
     synced_at: now,
-  };
-  sb.from('boss_entries').upsert(payload).then(function(r){
-    if (r.error) console.warn('[auto-snap] upsert failed', r.error);
+  }).eq('id', e.id).then(function(r){
+    if (r.error) console.warn('[auto-snap] update failed', r.error);
   });
 }
 
@@ -735,12 +729,44 @@ function phaseName(ph) {
 }
 
 // ── Phase estimation (learning-aware) ─────────────────────────
-var DEFAULT_PHASE_SPEED = 3 / (90 * 60000); // 3 phases per 90 min (cold-start fallback)
+// Phase progression is player-driven: phases advance as players clear the
+// map, so speed is really a proxy for population. The model separates the
+// fixed game mechanic (acceleration) from the variable (population):
+//   speed(segment) = baseSpeed × PHASE_ACCEL^(segment-1)
+var REF_SPEED   = 3 / (90 * 60000);  // unit reference: 3 phases / 90 min
+var PHASE_ACCEL = 1.95;              // speed ×/phase — game-mechanic constant
+var BASE_ACTIVE = 0.80 * REF_SPEED;  // P1 base speed, high-population fallback
+var BASE_QUIET  = 0.45 * REF_SPEED;  // P1 base speed, low-population fallback
+var ACTIVE_WINDOW_MS   = 7 * 86400000;  // window for the recent-inflow check
+var ACTIVE_MIN_SAMPLES = 5;             // recent samples needed to count as "active"
+
+function segmentSpeed(base, segment) {
+  return base * Math.pow(PHASE_ACCEL, segment - 1);
+}
+
+// P1-equivalent base speed of a sample, with the segment acceleration removed.
+// seg 0 means a cross-segment pair — approximated as a mid-span (P1.5) sample.
+function sampleBaseSpeed(s) {
+  var exp = (s.seg >= 1 && s.seg <= 4) ? s.seg - 1 : 1.5;
+  return s.spd / Math.pow(PHASE_ACCEL, exp);
+}
+
+// Population proxy: "active" when the level still receives fresh samples.
+// Auto-adapts as the endgame shifts — no hardcoded level numbers.
+function levelActivity(level, now) {
+  var raw = knowledge['lv' + level] || [];
+  var recent = 0;
+  for (var i = 0; i < raw.length; i++) {
+    if (now - raw[i].ts <= ACTIVE_WINDOW_MS) recent++;
+  }
+  return recent >= ACTIVE_MIN_SAMPLES ? 'active' : 'quiet';
+}
 
 // Build per-level speed samples from current entry snapshots, then merge in
 // the localStorage-backed history so learning survives across kill cycles.
 function rebuildKnowledge() {
   knowledge = {};
+  _baseSpeedCache = {};
   var now = Date.now();
   Object.keys(entries).forEach(function(k){
     var e = entries[k];
@@ -757,7 +783,7 @@ function rebuildKnowledge() {
       var segA = Math.floor(snaps[i-1].phase);
       var segB = Math.floor(snaps[i].phase);
       var seg  = (segA === segB) ? segA : 0;
-      var ratio = spd / DEFAULT_PHASE_SPEED;
+      var ratio = spd / REF_SPEED;
       var w = ratio > 1.2 ? 4 : ratio < 0.8 ? 1 : 2;
       knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, w: w, hb: hourBucket(snaps[i].time) });
     }
@@ -777,62 +803,78 @@ function decayWeight(ts, now) {
   return Math.max(0.2, 1 - age * 0.05);  // 5%/day, floor 0.2
 }
 
-function weightedTrimMean(samples, trimPct) {
+// Weighted geometric mean over sample .base values — the robust central
+// estimate for phase-speed data, which is log-normal (multiplicative noise);
+// an arithmetic mean is dragged up by fast outliers. Light-trims the extremes.
+function weightedGeoMean(samples, trimPct) {
   if (!samples.length) return null;
-  var sorted = samples.slice().sort(function(a,b){ return a.spd - b.spd; });
+  var sorted = samples.slice().sort(function(a,b){ return a.base - b.base; });
   var trim = Math.floor(sorted.length * trimPct);
   var kept = sorted.slice(trim, sorted.length - trim);
   if (!kept.length) kept = sorted;
-  var totalW = 0, sum = 0;
-  kept.forEach(function(s){ totalW += s.w; sum += s.spd * s.w; });
-  return totalW > 0 ? sum / totalW : null;
+  var totalW = 0, sumLog = 0;
+  kept.forEach(function(s){
+    if (s.base > 0 && s.w > 0) { totalW += s.w; sumLog += Math.log(s.base) * s.w; }
+  });
+  return totalW > 0 ? Math.exp(sumLog / totalW) : null;
 }
 
-function getPhaseSpeed(level, segment, atTime) {
-  var raw = knowledge['lv' + level] || [];
-  if (!raw.length) return DEFAULT_PHASE_SPEED;
+// Per-level base (P1-equivalent) speed, learned with a day-type/hour-bucket
+// cascade. Memoised per (level, bucket, day-type); the cache is cleared by
+// rebuildKnowledge whenever the sample set changes.
+var _baseSpeedCache = {};
+
+function baseSpeedFor(level, atTime) {
   var now    = Date.now();
   var t      = atTime || now;
   var bucket = hourBucket(t);
   var dt     = dayType(t);
+  var ckey   = level + '|' + bucket + '|' + dt;
+  if (_baseSpeedCache[ckey] !== undefined) return _baseSpeedCache[ckey];
 
-  // Re-derive each sample's bucket + day-type from its ts. Stored s.hb
-  // is ignored — old 4-bucket values would be stale under the new scheme.
-  var dec = raw.map(function(s){
-    return {
-      spd: s.spd,
-      w:   s.w * decayWeight(s.ts, now),
-      seg: s.seg,
-      hb:  hourBucket(s.ts),
-      dt:  dayType(s.ts),
-    };
-  });
+  // Cold-start fallback depends on the level's detected population regime.
+  var result = levelActivity(level, now) === 'quiet' ? BASE_QUIET : BASE_ACTIVE;
+  var raw    = knowledge['lv' + level] || [];
 
-  // Cascade — most specific to most general.
-  // Tier 1: dayType + bucket + segment   (e.g. weekend evening seg3)
-  // Tier 2: bucket + segment             (existing top tier)
-  // Tier 3: segment                      (any time, any day)
-  // Tier 4: bucket                       (this hour, any segment)
-  // Tier 5: level                        (any sample for this level)
-  // Tier 6: DEFAULT_PHASE_SPEED
-  var tiers = [
-    dec.filter(function(s){ return s.seg === segment && s.hb === bucket && s.dt === dt; }),
-    dec.filter(function(s){ return s.seg === segment && s.hb === bucket; }),
-    dec.filter(function(s){ return s.seg === segment; }),
-    dec.filter(function(s){ return s.hb === bucket; }),
-    dec,
-  ];
-  for (var i = 0; i < tiers.length; i++) {
-    if (tiers[i].length >= 3) {
-      var v = weightedTrimMean(tiers[i], 0.15);
-      if (v) return v;
+  if (raw.length) {
+    // Normalise every sample to a P1-equivalent base; re-derive bucket/day
+    // from ts (stored s.hb uses a stale scheme).
+    var dec = raw.map(function(s){
+      return {
+        base: sampleBaseSpeed(s),
+        w:    s.w * decayWeight(s.ts, now),
+        hb:   hourBucket(s.ts),
+        dt:   dayType(s.ts),
+      };
+    });
+    // Cascade, most specific to most general:
+    //   day-type + bucket  →  bucket  →  any sample for this level.
+    var tiers = [
+      dec.filter(function(s){ return s.hb === bucket && s.dt === dt; }),
+      dec.filter(function(s){ return s.hb === bucket; }),
+      dec,
+    ];
+    for (var i = 0; i < tiers.length; i++) {
+      if (tiers[i].length >= 3) {
+        var v = weightedGeoMean(tiers[i], 0.15);
+        if (v) { result = v; break; }
+      }
     }
   }
-  return DEFAULT_PHASE_SPEED;
+  _baseSpeedCache[ckey] = result;
+  return result;
+}
+
+function getPhaseSpeed(level, segment, atTime) {
+  return segmentSpeed(baseSpeedFor(level, atTime), segment);
 }
 
 function confidence(level) {
   var n = (knowledge['lv' + level] || []).length;
+  // A quiet (low-population) level is unpredictable however many old samples
+  // it has — flag it rather than claiming adaptive accuracy.
+  if (levelActivity(level, Date.now()) === 'quiet')
+    return { label: '⚠ quiet zone', n: n, cls: 'conf-fb' };
   if (n >= 5) return { label: '✦ adaptive', n: n, cls: 'conf-ad' };
   if (n >= 3) return { label: '≈ learning', n: n, cls: 'conf-lr' };
   return        { label: '· fallback',  n: n, cls: 'conf-fb' };
@@ -884,20 +926,39 @@ function getSpawnAt(e) {
   return walkPhases(seed.phase, seed.t, null, e.level).t;
 }
 
+// Spawn-time uncertainty: coefficient of variation from the level's own
+// samples when there's enough data, else a population-regime default —
+// quiet zones progress erratically, so their uncertainty stays wide.
+function levelCV(level, now) {
+  if (levelActivity(level, now) === 'quiet') return 0.85;
+  var raw = knowledge['lv' + level] || [];
+  if (raw.length >= 5) {
+    var vals = raw.map(sampleBaseSpeed);
+    var mean = 0;
+    vals.forEach(function(v){ mean += v; });
+    mean /= vals.length;
+    if (mean > 0) {
+      var variance = 0;
+      vals.forEach(function(v){ variance += (v - mean) * (v - mean); });
+      variance /= vals.length;
+      return Math.max(0.30, Math.min(1.0, Math.sqrt(variance) / mean));
+    }
+  }
+  return 0.55;
+}
+
 function getSpawnStddev(e) {
   var snaps = e.snapshots || [];
   var phase, t;
   if (snaps.length) { phase = snaps[snaps.length-1].phase; t = snaps[snaps.length-1].time; }
   else if (e.killTime && e.durationMs) { phase = 1.0; t = e.killTime + e.durationMs; }
   else { phase = 1.0; t = Date.now(); }
-  var samples = knowledge['lv' + e.level] || [];
+  var cv = levelCV(e.level, Date.now());
   var totalVar = 0;
   while (phase < 5.0) {
     var segEnd = Math.min(5.0, Math.floor(phase) + 1);
     var spd    = getPhaseSpeed(e.level, Math.floor(phase), t);
     var dt     = (segEnd - phase) / spd;
-    var segN   = samples.filter(function(s){ return s.seg === Math.floor(phase); }).length;
-    var cv     = segN >= 3 ? 0.20 : 0.40;
     totalVar  += Math.pow(dt * cv, 2);
     t += dt;
     phase = segEnd;
@@ -1204,19 +1265,10 @@ function renderInsights() {
     var conf    = confidence(lv);
     var samples = (knowledge[key] || []);
 
-    // Pooled rate from ALL samples for this level (current + persisted)
-    var avgSpd = null;
-    if (samples.length) {
-      var totalW = 0, sum = 0;
-      samples.forEach(function(s){
-        var dw = s.w * decayWeight(s.ts, now);
-        totalW += dw; sum += s.spd * dw;
-      });
-      avgSpd = totalW > 0 ? sum / totalW : null;
-    }
-    var rateLine = avgSpd
-      ? (avgSpd * 60000).toFixed(2) + ' ph/min (' + (avgSpd / DEFAULT_PHASE_SPEED).toFixed(2) + '× ref)'
-      : '—';
+    // Learned P1-equivalent base speed for this level (parametric model).
+    var baseSpd  = baseSpeedFor(lv, now);
+    var rateLine = (baseSpd * 60000).toFixed(3) + ' ph/min base ('
+                 + (baseSpd / REF_SPEED).toFixed(2) + '× ref)';
 
     // Reference per-segment ETAs (P1 → P5) from now, using current bucket
     var segLines = [], walkPh = 1.0, walkT = now;
@@ -1248,12 +1300,12 @@ function renderInsights() {
     // Time-of-day breakdown: fastest / slowest hour bucket
     var bucketAgg = {};
     samples.forEach(function(s){
-      if (!s.hb) return;
-      if (!bucketAgg[s.hb]) bucketAgg[s.hb] = { totalW: 0, sum: 0, n: 0 };
+      var hb = hourBucket(s.ts);   // re-derive — stored s.hb uses a stale scheme
+      if (!bucketAgg[hb]) bucketAgg[hb] = { totalW: 0, sum: 0, n: 0 };
       var dw = s.w * decayWeight(s.ts, now);
-      bucketAgg[s.hb].totalW += dw;
-      bucketAgg[s.hb].sum    += s.spd * dw;
-      bucketAgg[s.hb].n++;
+      bucketAgg[hb].totalW += dw;
+      bucketAgg[hb].sum    += sampleBaseSpeed(s) * dw;
+      bucketAgg[hb].n++;
     });
     var bucketArr = Object.keys(bucketAgg)
       .filter(function(k){ return bucketAgg[k].n >= 2 && bucketAgg[k].totalW > 0; })
@@ -1262,10 +1314,10 @@ function renderInsights() {
     var bucketLine = null;
     if (bucketArr.length >= 1) {
       var fast = bucketArr[0];
-      var fastStr = BUCKET_LABEL[fast.hb] + ' (' + (fast.avg / DEFAULT_PHASE_SPEED).toFixed(2) + '× · ' + fast.n + ')';
+      var fastStr = BUCKET_LABEL[fast.hb] + ' (' + (fast.avg / REF_SPEED).toFixed(2) + '× · ' + fast.n + ')';
       if (bucketArr.length >= 2) {
         var slow = bucketArr[bucketArr.length - 1];
-        var slowStr = BUCKET_LABEL[slow.hb] + ' (' + (slow.avg / DEFAULT_PHASE_SPEED).toFixed(2) + '× · ' + slow.n + ')';
+        var slowStr = BUCKET_LABEL[slow.hb] + ' (' + (slow.avg / REF_SPEED).toFixed(2) + '× · ' + slow.n + ')';
         bucketLine = 'Fast: ' + fastStr + ' · Slow: ' + slowStr;
       } else {
         bucketLine = 'Fast: ' + fastStr;
