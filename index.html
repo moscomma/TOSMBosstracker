@@ -249,6 +249,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 .chip-edit{cursor:pointer;font:inherit;letter-spacing:inherit;transition:all .15s;outline:none}
 .chip-edit:hover{border-color:var(--col-p1);box-shadow:0 0 8px #6ecf9533}
 .chip-edit:focus{border-color:var(--col-p1)}
+.js-shiftch{color:#f87171;border-color:#7f1d1d55}.js-shiftch:hover{border-color:#f87171;box-shadow:0 0 8px #f8717155}
 .cd-num.js-edittime{cursor:pointer;border-radius:6px;padding:0 4px;transition:background .15s}
 .cd-num.js-edittime:hover{background:var(--bg2)}
 .card-acts{display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);align-items:stretch}
@@ -681,6 +682,7 @@ function cardHTML(e) {
       '<div class="chips">',
         '<button class="chip chip-edit js-editlv" data-id="'+esc(e.id)+'" title="Click to edit level"><span class="cl">LV</span><span class="cv">'+esc(e.level||'?')+'</span></button>',
         '<button class="chip chip-edit js-editch" data-id="'+esc(e.id)+'" title="Click to edit channel"><span class="cl">CH</span><span class="cv">'+esc(e.channel||'?')+'</span></button>',
+        '<button class="chip chip-edit js-shiftch" data-id="'+esc(e.id)+'" title="Shift all channels for this level +1">+CH</button>',
       '</div>',
       '<span class="state-badge '+S_BADGE[st.s]+'">'+S_LABEL[st.s]+'</span>',
     '</div>',
@@ -744,10 +746,38 @@ function segmentSpeed(base, segment) {
   return base * Math.pow(PHASE_ACCEL, segment - 1);
 }
 
+// Effective (time-weighted) phase segment of a snapshot pair spanning pA→pB.
+// A single-segment pair returns its integer segment exactly; a cross-segment
+// pair returns the fractional segment whose acceleration matches the time the
+// pair actually spent in each band. Removing it (below) recovers an unbiased
+// base speed. This replaces the old fixed-P1.5 fudge, which systematically
+// UNDER-estimated base for cross-segment pairs (~80% of samples): a P1→P3 pair
+// spends most of its time in the slow early band, but P1.5 divided by only
+// accel^0.5. PHASE_ACCEL is validated separately on clean single-segment
+// samples, so using it here to de-bias is principled, not circular.
+function effectiveSeg(pA, pB) {
+  if (!(pB > pA)) return 0;
+  var total = pB - pA;     // Σ Δφ_k
+  var den = 0;             // Σ Δφ_k / PHASE_ACCEL^(k-1) — time to cross at base 1
+  var p = pA;
+  while (p < pB) {
+    var k = Math.max(1, Math.floor(p));
+    var segEnd = Math.min(pB, Math.floor(p) + 1);
+    den += (segEnd - p) / Math.pow(PHASE_ACCEL, k - 1);
+    p = segEnd;
+  }
+  return den > 0 ? 1 + Math.log(total / den) / Math.log(PHASE_ACCEL) : 0;
+}
+
 // P1-equivalent base speed of a sample, with the segment acceleration removed.
-// seg 0 means a cross-segment pair — approximated as a mid-span (P1.5) sample.
+// Prefers the fractional effective segment (effSeg) when known; falls back to
+// the stored integer seg, and finally to a P1.5 mid-span guess for legacy rows
+// that predate eff_seg.
 function sampleBaseSpeed(s) {
-  var exp = (s.seg >= 1 && s.seg <= 4) ? s.seg - 1 : 1.5;
+  var es = (typeof s.effSeg === 'number' && s.effSeg >= 1 && s.effSeg <= 4) ? s.effSeg
+         : (s.seg >= 1 && s.seg <= 4)                                       ? s.seg
+         : null;
+  var exp = es !== null ? es - 1 : 1.5;
   return s.spd / Math.pow(PHASE_ACCEL, exp);
 }
 
@@ -783,9 +813,10 @@ function rebuildKnowledge() {
       var segA = Math.floor(snaps[i-1].phase);
       var segB = Math.floor(snaps[i].phase);
       var seg  = (segA === segB) ? segA : 0;
+      var effSeg = effectiveSeg(snaps[i-1].phase, snaps[i].phase);
       var ratio = spd / REF_SPEED;
       var w = ratio > 1.2 ? 4 : ratio < 0.8 ? 1 : 2;
-      knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, w: w, hb: hourBucket(snaps[i].time) });
+      knowledge[key].push({ spd: spd, ts: snaps[i].time, seg: seg, effSeg: effSeg, w: w, hb: hourBucket(snaps[i].time) });
     }
   });
   // Merge persisted history (older samples from past cycles)
@@ -1571,6 +1602,8 @@ async function commitSnapshot(level, ch, phase, nick) {
   logAudit('phase', level, ch, { phase: rounded });
   // Persist sample for cross-cycle learning
   if (snaps.length >= 2) persistLatestSample(String(level), snaps, entryId(level, ch));
+  // Capture the completed cycle (player-observed spawn) for spawn-time backtesting
+  if (rounded >= 5) recordSpawnCycle(String(level), ch, snaps, entryId(level, ch));
 }
 
 // ── Modal open / close ───────────────────────────────────────
@@ -1717,6 +1750,7 @@ document.getElementById('grid').addEventListener('click', async function(ev){
   else if (t.closest('.js-respawn'))  await handleCardAction('respawn', id);
   else if (t.closest('.js-edittime')) await handleCardAction('time',    id);
   else if (t.closest('.js-editch'))   await handleCardAction('ch',      id);
+  else if (t.closest('.js-shiftch'))  await handleShiftChannels(id);
   else if (t.closest('.js-editlv'))   await handleCardAction('lv',      id);
 });
 
@@ -1824,20 +1858,41 @@ async function moveEntry(e, newLv, newCh, nick) {
   logAudit('move', e.level, e.channel, { toLv: newLv, toCh: newCh });
 }
 
+async function handleShiftChannels(id) {
+  var e = entries[id];
+  if (!e) return;
+  var level = e.level;
+  var nick = ensureNick();
+
+  // Collect all entries for this level, sorted descending by channel so we
+  // bump the highest first and never collide with an entry that hasn't moved yet.
+  var toShift = Object.values(entries)
+    .filter(function(x) { return x.level === level; })
+    .sort(function(a, b) { return parseInt(b.channel, 10) - parseInt(a.channel, 10); });
+
+  for (var i = 0; i < toShift.length; i++) {
+    var x = toShift[i];
+    await moveEntry(x, x.level, String(parseInt(x.channel, 10) + 1), nick);
+  }
+}
+
 // ── Persisted phase samples (Supabase-backed; shared across browsers) ──
 var SAMPLE_KEY_LEGACY = 'tos_phase_samples_v1';   // for one-time migration only
 var persistedSamples = {};   // { 'lv145': [{spd, ts, seg, w, hb}, ...] }
 
 async function loadSamples() {
+  // select('*') so the load tolerates the eff_seg column being present or not
+  // (works before and after the migration that adds it).
   var { data, error } = await sb.from('phase_samples')
-    .select('level, spd, ts, seg, w, hb')
+    .select('*')
     .order('ts', { ascending: true });
   if (error) { console.warn('[insights] sample load failed', error); return; }
   persistedSamples = {};
   (data || []).forEach(function(r){
     var key = 'lv' + r.level;
     if (!persistedSamples[key]) persistedSamples[key] = [];
-    persistedSamples[key].push({ spd: r.spd, ts: r.ts, seg: r.seg, w: r.w, hb: r.hb });
+    persistedSamples[key].push({ spd: r.spd, ts: r.ts, seg: r.seg,
+      effSeg: (typeof r.eff_seg === 'number' ? r.eff_seg : undefined), w: r.w, hb: r.hb });
   });
 }
 
@@ -1851,6 +1906,7 @@ async function persistLatestSample(level, snaps, sourceId) {
     spd: dp / dt,
     ts: b.time,
     seg: Math.floor(a.phase) === Math.floor(b.phase) ? Math.floor(a.phase) : 0,
+    eff_seg: effectiveSeg(a.phase, b.phase),
     w: 2,
     hb: hourBucket(b.time),
     source_id: sourceId || null,
@@ -1858,10 +1914,45 @@ async function persistLatestSample(level, snaps, sourceId) {
   // Best-effort insert; the unique (level, ts) index dedupes server-side.
   try {
     var { error } = await sb.from('phase_samples').insert(row);
+    // If the eff_seg column hasn't been added yet, retry without it so cross-
+    // browser persistence never breaks on a not-yet-migrated database.
+    if (error && /eff_seg/.test(error.message || '')) {
+      delete row.eff_seg;
+      ({ error } = await sb.from('phase_samples').insert(row));
+    }
     if (error && !/duplicate key/i.test(error.message || '')) {
       console.warn('[insights] sample insert failed', error);
     }
   } catch (e) { console.warn('[insights] sample insert threw', e); }
+}
+
+// Record a completed boss cycle as ground truth for offline spawn-time
+// backtesting (analyze.py replays the model from the early snapshots and
+// compares predicted vs actual spawn). Captures only PLAYER-observed spawns
+// with a genuine pre-spawn climb; auto-respawn (estimate ≥ 5) points are
+// excluded so the ground truth stays uncontaminated. Best-effort + tolerant:
+// until the spawn_cycles table exists the insert is silently skipped.
+async function recordSpawnCycle(level, ch, snaps, sourceId) {
+  if (!snaps || snaps.length < 2) return;
+  var spawn = snaps[snaps.length - 1];
+  if (!(spawn.phase >= 5)) return;
+  var pre = snaps.slice(0, -1);
+  if (!pre.some(function(s){ return s.phase >= 1 && s.phase < 5; })) return;  // need a climb
+  if (pre.some(function(s){ return s.phase >= 5; })) return;                  // first spawn only
+  var row = {
+    level: String(level), channel: String(ch),
+    cycle_start_ts: snaps[0].time,   // dedupe key — stable across browsers, unique per cycle
+    spawn_ts: spawn.time, trajectory: snaps, n_snaps: snaps.length,
+    source_id: sourceId || null,
+  };
+  try {
+    var { error } = await sb.from('spawn_cycles').insert(row);
+    if (error &&
+        !/duplicate key/i.test(error.message || '') &&
+        !/spawn_cycles|does not exist|schema cache|find the table/i.test(error.message || '')) {
+      console.warn('[backtest] spawn_cycle insert failed', error);
+    }
+  } catch (e) { console.warn('[backtest] spawn_cycle insert threw', e); }
 }
 
 async function migrateLegacySamples() {
@@ -1918,7 +2009,8 @@ sb.channel('insights-live')
         for (var i = arr.length - 1; i >= Math.max(0, arr.length - 16); i--) {
           if (arr[i].ts === r.ts) return;
         }
-        arr.push({ spd: r.spd, ts: r.ts, seg: r.seg, w: r.w, hb: r.hb });
+        arr.push({ spd: r.spd, ts: r.ts, seg: r.seg,
+          effSeg: (typeof r.eff_seg === 'number' ? r.eff_seg : undefined), w: r.w, hb: r.hb });
         rebuildKnowledge();
         renderAll();
       })

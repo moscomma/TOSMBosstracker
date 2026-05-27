@@ -73,7 +73,9 @@ speed(segment) = baseSpeed(level) × PHASE_ACCEL^(segment-1)
 
 - **`baseSpeed`** — the *variable*: a level's learned P1-equivalent speed,
   scaling with population. `baseSpeedFor(level, atTime)` (~833): normalises
-  every sample to a P1 base (`sampleBaseSpeed`, ~755), runs a day-type/hour-bucket
+  every sample to a P1 base (`sampleBaseSpeed`, ~755 — divides out the segment
+  acceleration using `eff_seg`/`effectiveSeg` when known, else integer `seg`,
+  else a legacy P1.5 guess), runs a day-type/hour-bucket
   cascade, and takes a **weighted geometric mean** (`weightedGeoMean`, ~815 —
   speed data is log-normal, so an arithmetic mean would overestimate).
   Memoised in `_baseSpeedCache`, cleared by `rebuildKnowledge`.
@@ -116,7 +118,8 @@ detected **dynamically**, never by hardcoded level number.
 | `level` | map level (string) |
 | `spd`   | phases per ms between two snapshots |
 | `ts`    | epoch ms of the later snapshot |
-| `seg`   | integer phase segment 1–4; `0` = the pair spanned segments |
+| `seg`   | integer phase segment 1–4; `0` = the pair spanned segments. Still the clean single-segment flag used by the weekly per-segment / `PHASE_ACCEL` analysis. |
+| `eff_seg` | **(added 2026-05-26)** fractional, time-weighted effective segment of the pair (`effectiveSeg`). For cross-segment pairs this replaces the biased `seg=0`→P1.5 decode so base speed comes out unbiased. NULL on legacy rows ⇒ falls back to `seg`; the ~474 historical `seg=0` rows still decode at P1.5 and **cannot be retroactively de-biased** (original snapshot endpoints weren't stored). The fix accumulates on new inserts. Migration: `db/2026-05-26-add-eff_seg.sql`. |
 | `w`     | base weight (always 2 from inserts) |
 | `hb`    | hour-bucket at insert (⚠ stale scheme — code re-derives from `ts`) |
 | `source_id`, `created_at` | provenance |
@@ -128,6 +131,26 @@ detected **dynamically**, never by hardcoded level number.
 - `rebuildKnowledge` (~773) pools live entry snapshots + persisted samples into
   the in-memory `knowledge` map: `{ 'lv123': [{spd, ts, seg, w, hb}, …] }`.
 - `decayWeight` (~807) ages samples 5%/day, floor 0.2.
+
+**Supabase table `spawn_cycles`** (added 2026-05-26 — ground truth for spawn-time
+backtesting; migration `db/2026-05-26-add-spawn_cycles.sql`):
+
+| Column | Meaning |
+|--------|---------|
+| `level`, `channel` | the cycle's map level / channel |
+| `cycle_start_ts` | epoch ms of the cycle's first snapshot; the dedupe key (`unique (level, channel, cycle_start_ts)`) so duplicate spawn reports collapse but each new cycle is its own row |
+| `spawn_ts` | epoch ms of the **player-observed** phase-5 report (actual spawn) |
+| `trajectory` | jsonb `[{phase, time}, …]` — the cycle's phase climb incl. the spawn point |
+| `n_snaps`, `source_id`, `created_at` | provenance |
+
+- `recordSpawnCycle` (in `commitSnapshot`, fires when a player reports phase ≥ 5)
+  captures a cycle only if it had a genuine pre-spawn climb and wasn't already
+  marked spawned by `maybeAutoSnapRespawn` — so the spawn time is real, not the
+  model's own estimate (which would make backtesting circular).
+- `analyze.py` (`backtest_spawn_cycles`) replays the model from each cycle's early
+  snapshots and compares predicted vs actual spawn → **real end-to-end accuracy**,
+  the only check that goes beyond the base-speed self-consistency of the LOO CV.
+  Empty until the table exists and cycles accrue.
 
 ---
 
