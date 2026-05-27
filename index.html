@@ -392,7 +392,8 @@ var sortBy     = 'soonest';   // 'soonest' | 'channel' | 'stable' — default is
 var knowledge  = {};   // { 'lv145': [{spd, ts, seg, w}, ...] }
 var locallyDeleted = {};   // id -> Date.now() of when this client issued the delete
 var volume     = 0.5;
-var prevPhases = {};   // { entryId: lastEstimatedPhase } — for phase-4 alert
+var prevPhases  = {};   // { entryId: lastEstimatedPhase } — for phase-4 alert
+var _p4Alerted  = {};   // { entryId: true } — gate P4 to once per P1 cycle
 
 // ── Sound ─────────────────────────────────────────────────────
 function getAudioCtx() {
@@ -434,7 +435,7 @@ function checkTransition(id, newState) {
   prevStates[id] = newState;
   if (!prev || prev === newState) return;
   if      (newState === 'soon')  { beep(SOUND_SOON);  markAlerting(id); }
-  else if (newState === 'p1')    { beep(SOUND_P1);    markAlerting(id); }
+  else if (newState === 'p1')    { delete _p4Alerted[id]; beep(SOUND_P1); markAlerting(id); }
   else if (newState === 'spawn') { beep(SOUND_SPAWN); markAlerting(id); maybeAutoSnapRespawn(id); }
 }
 
@@ -494,8 +495,11 @@ function checkPhaseAlert(id, currentPhase) {
   var prev = prevPhases[id];
   prevPhases[id] = currentPhase;
   if (prev === undefined) return;
-  // Crossing 4.0 (but not jumping straight to spawn) → P4 alert
-  if (prev < 4.0 && currentPhase >= 4.0 && currentPhase < 5.0) {
+  // Crossing 4.0 (but not jumping straight to spawn) → P4 alert.
+  // _p4Alerted gate prevents re-firing if a snapshot briefly pulls the
+  // estimate back below 4.0 after the alert has already played.
+  if (!_p4Alerted[id] && prev < 4.0 && currentPhase >= 4.0 && currentPhase < 5.0) {
+    _p4Alerted[id] = true;
     beep(SOUND_P4); markAlerting(id);
   }
 }
@@ -527,11 +531,15 @@ document.addEventListener('visibilitychange', function() {
     _hiddenStates = Object.assign({}, prevStates);
   } else {
     var ctx = getAudioCtx();
-    if (ctx.state === 'suspended') ctx.resume();
+    // Capture suspended state BEFORE resuming — only re-alert if AudioContext
+    // was actually silent while hidden (brief tab-switches leave it running,
+    // so the tick-based beep was already audible; no need to repeat it).
+    var wasSuspended = ctx.state === 'suspended';
+    if (wasSuspended) ctx.resume();
     var missed = Object.keys(prevStates).filter(function(id) {
       return prevStates[id] === 'spawn' && _hiddenStates[id] !== 'spawn';
     });
-    if (missed.length && soundOn) {
+    if (wasSuspended && missed.length && soundOn) {
       beep(SOUND_SPAWN);
       missed.forEach(function(id) { markAlerting(id); });
     }
