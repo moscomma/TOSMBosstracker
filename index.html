@@ -440,9 +440,9 @@ function checkTransition(id, newState) {
 }
 
 // When state freshly flips to 'spawn' via the phase estimate (no real
-// respawn snapshot yet), insert a phase-5 snapshot so the bot's 9-min
-// auto-cleanup countdown can start. Skip if a phase-5 snapshot already
-// exists in this cycle.
+// respawn snapshot yet), insert a phase-5 snapshot so the website's 10-min
+// auto-cleanup countdown (sweepAutoDelete) can start. Skip if a phase-5
+// snapshot already exists in this cycle.
 function maybeAutoSnapRespawn(id) {
   var e = entries[id];
   if (!e) return;
@@ -460,6 +460,45 @@ function maybeAutoSnapRespawn(id) {
     synced_at: now,
   }).eq('id', e.id).then(function(r){
     if (r.error) console.warn('[auto-snap] update failed', r.error);
+  });
+}
+
+// ── Auto-delete respawned trackers (website-owned) ───────────
+// This is the cleanup job the retired Discord bot used to run. Delete a boss
+// RESPAWN_TTL_MS after its FIRST phase-5 snapshot, so the board stays clean.
+// Driven from the tick loop over the full `entries` map (not just visible
+// cards) and once after loadAll(), so it clears the backlog when a tab opens.
+var RESPAWN_TTL_MS = 10 * 60 * 1000;   // 10 min after respawn → auto-delete
+
+function firstSpawnTs(snaps) {
+  if (!snaps) return 0;
+  for (var i = 0; i < snaps.length; i++) {
+    if ((snaps[i].phase || 0) >= 5) return snaps[i].time || 0;
+  }
+  return 0;
+}
+
+function sweepAutoDelete() {
+  var now = Date.now();
+  Object.keys(entries).forEach(function(id){
+    if (locallyDeleted[id]) return;            // this client already issued the delete
+    var e = entries[id];
+    var spawnAt = firstSpawnTs(e && e.snapshots);
+    if (!spawnAt) return;                       // no confirmed respawn → never auto-delete
+    if (now - spawnAt <= RESPAWN_TTL_MS) return;
+    autoDeleteEntry(e);
+  });
+}
+
+// Idempotent across N open tabs (and the bot, if it's still alive mid-cutover):
+// .select() means only the client whose delete actually removed the row logs
+// the audit — every other delete returns empty data and stays silent.
+function autoDeleteEntry(e) {
+  var id = e.id;
+  locallyDeleted[id] = Date.now();
+  sb.from('boss_entries').delete().eq('id', id).select('id, level, channel').then(function(r){
+    if (r.error) { console.warn('[auto-delete] failed', r.error); delete locallyDeleted[id]; return; }
+    if (r.data && r.data.length) logAudit('auto', e.level, e.channel, { reason: 'respawn-ttl' }, null);
   });
 }
 
@@ -1245,6 +1284,9 @@ function startTick() {
     document.querySelectorAll('.card').forEach(function(card){
       var e = entries[card.dataset.id]; if (e) tick1(card, e, now);
     });
+    // Cleanup sweep runs over the full entries map (not just visible cards),
+    // so a respawned boss is deleted even under an active filter/search.
+    sweepAutoDelete();
     if (insOpen && (++_insTick % 3 === 0)) renderInsights();
   }, 1000);
 }
@@ -1448,6 +1490,7 @@ async function loadAll() {
   (data || []).forEach(function(row){ var e = rowToEntry(row); entries[e.id] = e; });
   rebuildKnowledge();
   renderAll();
+  sweepAutoDelete();   // clear any respawn backlog accumulated while no tab was open
 }
 
 sb.channel('boss-live')
