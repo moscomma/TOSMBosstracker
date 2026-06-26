@@ -179,6 +179,8 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 /* ── Floating quick-add bar ────────────────────────────── */
 .qa{position:fixed;right:14px;bottom:14px;z-index:150;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(18,20,26,.92);border:1px solid #2a2e38;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);backdrop-filter:blur(8px);font-family:var(--body)}
 .qa input{width:200px;background:transparent;border:none;outline:none;color:#e8e8f0;font-size:13px;padding:4px 2px}
+.qa input.qa-lock{width:42px;flex:0 0 auto;border:1px solid #2a2e38;border-radius:6px;padding:4px;text-align:center;color:#c9a84c}
+.qa input.qa-lock:focus{border-color:#c9a84c}
 .qa input::placeholder{color:#6a6e78}
 .qa-btn{background:#3a7bd5;color:#fff;border:none;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:13px;font-weight:600}
 .qa-btn:hover{background:#4a8be5}
@@ -325,15 +327,20 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
       <div class="mod-t">ADD BOSS DATA</div>
       <button type="button" class="mod-x" id="modX" title="Close">✕</button>
     </div>
+    <div class="mod-fld" style="margin-bottom:12px">
+      <label class="mod-lbl">Lock level (optional) — then type just <code style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0 4px;color:var(--col-p1)">CH VALUE</code></label>
+      <input class="mod-in" id="lockLv" inputmode="numeric" placeholder="e.g. 143" style="max-width:130px" />
+    </div>
     <div class="mod-fld">
-      <label class="mod-lbl">Type a command — same syntax as Discord</label>
+      <label class="mod-lbl" id="addCmdLbl">Type a command — same syntax as Discord</label>
       <input class="mod-in" id="addCmd" placeholder="145 3 1.20" autofocus />
       <div class="mod-hint">
         <code>145 3 1.20</code> → LV145 CH3 killed, P1 in 1h 20m<br/>
         <code>145 3 50</code> → killed, P1 in 50 min<br/>
         <code>145 3 1:30</code> → killed, P1 in 1h 30m<br/>
         <code>145 3 4.2</code> → currently Phase 4.2<br/>
-        <code>145 3 on</code> → boss respawned (= 5.0)
+        <code>145 3 on</code> → boss respawned (= 5.0)<br/>
+        <span id="lockHint" style="color:var(--col-p1);display:none">Level locked → <code>3 20</code> = CH3, 20 min · full <code>140 3 50</code> still works</span>
       </div>
     </div>
     <div class="mod-msg" id="addMsg"></div>
@@ -358,6 +365,7 @@ main{max-width:1200px;margin:0 auto;padding:20px 24px}
 <!-- Floating quick-add bar (placed before scripts so JS can attach listeners) -->
 <form id="qaForm" class="qa" autocomplete="off">
   <span id="qaStatus" class="qa-status"></span>
+  <input id="qaLock" class="qa-lock" inputmode="numeric" placeholder="lvl" title="Lock level — then type just CH VALUE (e.g. 3 20). A full LV CH VALUE still works." />
   <input id="qaCmd" placeholder="quick add — e.g. 145 3 1.20" />
   <button type="button" id="qaPipBtn" class="qa-pip-btn" title="Pop out (overlay the game)" hidden>⧉</button>
 </form>
@@ -451,7 +459,15 @@ function maybeAutoSnapRespawn(id) {
     if ((snaps[i].phase || 0) >= 5) return;
   }
   var now = Date.now();
-  var newSnaps = snaps.concat([{ phase: 5.0, time: now }]);
+  // auto:true marks this as an estimate-derived spawn (time = when noticed, not
+  // a real crossing). persistLatestSample skips it so synthetic endpoints never
+  // pollute the learned phase-speed model.
+  var newSnaps = snaps.concat([{ phase: 5.0, time: now, auto: true }]);
+  // Optimistically record the snapshot locally so the auto-delete TTL starts
+  // immediately and repeated sweeps (every 1s) don't re-issue this update while
+  // the realtime echo is in flight. The realtime UPDATE will replace e.snapshots
+  // with the authoritative server copy (identical) when it arrives.
+  e.snapshots = newSnaps;
   // update (not upsert): if this entry was deleted elsewhere, it must stay
   // deleted — upsert would re-insert the row and resurrect it.
   sb.from('boss_entries').update({
@@ -483,8 +499,17 @@ function sweepAutoDelete() {
   Object.keys(entries).forEach(function(id){
     if (locallyDeleted[id]) return;            // this client already issued the delete
     var e = entries[id];
-    var spawnAt = firstSpawnTs(e && e.snapshots);
-    if (!spawnAt) return;                       // no confirmed respawn → never auto-delete
+    if (!e) return;
+    var spawnAt = firstSpawnTs(e.snapshots);
+    if (!spawnAt) {
+      // No recorded phase-5 snapshot yet. If the boss has nonetheless crossed
+      // into 'spawn' by estimate, the snapshot side-effect in tick1/
+      // checkTransition can be missed entirely (card filtered out of view, or
+      // already-spawned at page load so the transition edge never fired). Record
+      // the crossing here so the TTL countdown can begin and the row is reaped.
+      if (getState(e, now).s === 'spawn') maybeAutoSnapRespawn(id);
+      return;                                   // no confirmed respawn → never auto-delete
+    }
     if (now - spawnAt <= RESPAWN_TTL_MS) return;
     autoDeleteEntry(e);
   });
@@ -1549,9 +1574,15 @@ function modMsg(id, text, kind) {
 //   "1.20" (two-digit dec)  → kill 1h 20m
 //   "1.2"  (one-digit, X∈1-5) → snap phase X.Y
 //   "50"   (bare int)       → kill 50 min
-function parseAddCmd(str) {
+function parseAddCmd(str, lockLv) {
   var parts = String(str || '').trim().toLowerCase().split(/\s+/);
-  if (parts.length < 3) return { error: 'Need: LV CH VALUE  (e.g. 145 3 1.20)' };
+  // With a locked level, "CH VALUE" (2 tokens) reuses it; a full "LV CH VALUE"
+  // (3+ tokens) still works and overrides the lock for that one entry.
+  var locked = parseInt(lockLv, 10);
+  if (locked && parts.length === 2) parts = [String(locked)].concat(parts);
+  if (parts.length < 3) {
+    return { error: locked ? 'Need: CH VALUE  (e.g. 3 20)' : 'Need: LV CH VALUE  (e.g. 145 3 1.20)' };
+  }
   var lv = parseInt(parts[0], 10);
   var ch = parseInt(parts[1], 10);
   if (!lv || !ch) return { error: 'Invalid level or channel' };
@@ -1691,8 +1722,10 @@ document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape' && mo
 
 document.getElementById('addForm').addEventListener('submit', async function(ev){
   ev.preventDefault();
-  var input = document.getElementById('addCmd');
-  var p = parseAddCmd(input.value);
+  var input  = document.getElementById('addCmd');
+  var lockEl = document.getElementById('lockLv');
+  var locked = lockEl && lockEl.value.trim();
+  var p = parseAddCmd(input.value, locked);
   if (p.error) return modMsg('addMsg', p.error, 'err');
   var btn = document.getElementById('addSave'); btn.disabled = true;
   modMsg('addMsg', 'Saving…');
@@ -1700,14 +1733,32 @@ document.getElementById('addForm').addEventListener('submit', async function(ev)
     var nick = ensureNick();
     if (p.kind === 'kill') await commitKill(p.level, p.ch, p.durationMs, nick);
     else                   await commitSnapshot(p.level, p.ch, p.phase, nick);
-    modMsg('addMsg', 'Saved ✓', 'ok');
+    modMsg('addMsg', 'Saved ✓ LV' + p.level + ' CH' + p.ch, 'ok');
     input.value = '';
-    setTimeout(closeModal, 500);
+    // With a locked level the user is usually entering several channels for the
+    // same map — keep the modal open and refocus so they can keep going.
+    if (locked) input.focus();
+    else setTimeout(closeModal, 500);
   } catch (e) {
     modMsg('addMsg', 'Error: ' + e.message, 'err');
   }
   btn.disabled = false;
 });
+
+// Show the lock-mode hint + retarget the command placeholder while a level is locked.
+(function(){
+  var lockEl = document.getElementById('lockLv');
+  if (!lockEl) return;
+  lockEl.addEventListener('input', function(){
+    var on = !!lockEl.value.trim();
+    var hint = document.getElementById('lockHint');
+    var cmd  = document.getElementById('addCmd');
+    var lbl  = document.getElementById('addCmdLbl');
+    if (hint) hint.style.display = on ? '' : 'none';
+    if (cmd)  cmd.placeholder = on ? '3 20   (CH VALUE)' : '145 3 1.20';
+    if (lbl)  lbl.textContent = on ? 'Type CH VALUE — or a full LV CH VALUE' : 'Type a command — same syntax as Discord';
+  });
+})();
 
 // ── Floating quick-add submit (mirrors the modal handler) ──────
 document.getElementById('qaForm').addEventListener('submit', async function(ev){
@@ -1715,8 +1766,10 @@ document.getElementById('qaForm').addEventListener('submit', async function(ev){
   var formEl = ev.currentTarget;
   var input  = formEl.querySelector('#qaCmd');
   var stat   = formEl.querySelector('#qaStatus');
+  var lockEl = formEl.querySelector('#qaLock');
   if (!input || !stat) return;
-  var p = parseAddCmd(input.value);
+  var locked = lockEl && lockEl.value.trim();
+  var p = parseAddCmd(input.value, locked);
   if (p.error) { stat.className = 'qa-status err'; stat.textContent = p.error; return; }
   input.disabled = true;
   stat.className = 'qa-status'; stat.textContent = 'Saving…';
@@ -1724,7 +1777,7 @@ document.getElementById('qaForm').addEventListener('submit', async function(ev){
     var nick = ensureNick();
     if (p.kind === 'kill') await commitKill(p.level, p.ch, p.durationMs, nick);
     else                   await commitSnapshot(p.level, p.ch, p.phase, nick);
-    stat.className = 'qa-status ok'; stat.textContent = 'Saved ✓';
+    stat.className = 'qa-status ok'; stat.textContent = 'Saved ✓ LV' + p.level + ' CH' + p.ch;
     input.value = '';
     setTimeout(function(){ stat.textContent = ''; stat.className = 'qa-status'; }, 1800);
   } catch (e) {
@@ -1733,6 +1786,16 @@ document.getElementById('qaForm').addEventListener('submit', async function(ev){
   input.disabled = false;
   input.focus();
 });
+
+// While a level is locked in the floating bar, retarget its command placeholder.
+(function(){
+  var lockEl = document.getElementById('qaLock');
+  var cmd    = document.getElementById('qaCmd');
+  if (!lockEl || !cmd) return;
+  lockEl.addEventListener('input', function(){
+    cmd.placeholder = lockEl.value.trim() ? '3 20  (CH VALUE)' : 'quick add — e.g. 145 3 1.20';
+  });
+})();
 
 // ── Pop-out quick-add into Document Picture-in-Picture ──────────
 (function initQuickAddPip(){
@@ -1750,6 +1813,8 @@ document.getElementById('qaForm').addEventListener('submit', async function(ev){
     'html,body{margin:0;padding:0;height:100%;background:#12141a;font-family:system-ui,-apple-system,Segoe UI,sans-serif}',
     '#qaForm{display:flex;align-items:center;gap:8px;padding:14px;height:100%;box-sizing:border-box;position:static;width:100%}',
     '#qaCmd{flex:1;background:#0d0f1a;border:1px solid #353860;color:#f0ead8;border-radius:6px;padding:8px 10px;font-family:monospace;font-size:13px;outline:none}',
+    '#qaLock{flex:0 0 auto;width:52px;background:#0d0f1a;border:1px solid #353860;color:#c9a84c;border-radius:6px;padding:8px 4px;font-family:monospace;font-size:13px;text-align:center;outline:none}',
+    '#qaLock:focus{border-color:#c9a84c}',
     '#qaCmd:focus{border-color:#c9a84c}',
     '#qaCmd::placeholder{color:#555070}',
     '#qaCmd:disabled{opacity:.5}',
@@ -1950,6 +2015,7 @@ async function loadSamples() {
 async function persistLatestSample(level, snaps, sourceId) {
   if (snaps.length < 2) return;
   var a = snaps[snaps.length - 2], b = snaps[snaps.length - 1];
+  if (b.auto || a.auto) return;   // synthetic auto-respawn endpoint → fabricated time, not a real speed sample
   var dt = b.time - a.time, dp = b.phase - a.phase;
   if (dt < 120000 || dp <= 0) return;
   var row = {
