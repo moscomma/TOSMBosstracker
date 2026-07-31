@@ -38,7 +38,7 @@ players clear monsters, phase climbs 1→5 → `Phase 5.0` = boss spawns → kil
 | `p1`    | Boss active, in phases 1–4 | a snapshot exists, or countdown expired |
 | `late`  | Active, countdown long overdue | `rem < -20 min` and not yet phase 5 |
 | `miss`  | Marked missing     | `e.missing` flag |
-| `spawn` | Boss respawned (Phase 5) | latest snapshot ≥ 5, or estimate ≥ 5 |
+| `spawn` | Boss respawned (Phase 5) | latest reported snapshot ≥ 5 |
 
 **Entry object** (camelCase, `rowToEntry`): `id, level, channel, killTime,
 durationMs, snapshots[], note, createdAt, missing`.
@@ -145,7 +145,7 @@ backtesting; migration `db/2026-05-26-add-spawn_cycles.sql`):
 
 - `recordSpawnCycle` (in `commitSnapshot`, fires when a player reports phase ≥ 5)
   captures a cycle only if it had a genuine pre-spawn climb and wasn't already
-  marked spawned by `maybeAutoSnapRespawn` — so the spawn time is real, not the
+  marked spawned by a reported Phase 5 snapshot — so the spawn time is real, not the
   model's own estimate (which would make backtesting circular).
 - `analyze.py` (`backtest_spawn_cycles`) replays the model from each cycle's early
   snapshots and compares predicted vs actual spawn → **real end-to-end accuracy**,

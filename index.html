@@ -446,44 +446,11 @@ function checkTransition(id, newState) {
   if (!prev || prev === newState) return;
   if      (newState === 'soon')  { beep(SOUND_SOON);  markAlerting(id); }
   else if (newState === 'p1')    { delete _p4Alerted[id]; beep(SOUND_P1); markAlerting(id); }
-  else if (newState === 'spawn') { beep(SOUND_SPAWN); markAlerting(id); maybeAutoSnapRespawn(id); }
-}
-
-// When state freshly flips to 'spawn' via the phase estimate (no real
-// respawn snapshot yet), insert a phase-5 snapshot so the website's 10-min
-// auto-cleanup countdown (sweepAutoDelete) can start. Skip if a phase-5
-// snapshot already exists in this cycle.
-function maybeAutoSnapRespawn(id) {
-  var e = entries[id];
-  if (!e) return;
-  var snaps = e.snapshots || [];
-  for (var i = 0; i < snaps.length; i++) {
-    if ((snaps[i].phase || 0) >= 5) return;
-  }
-  var now = Date.now();
-  // auto:true marks this as an estimate-derived spawn (time = when noticed, not
-  // a real crossing). persistLatestSample skips it so synthetic endpoints never
-  // pollute the learned phase-speed model.
-  var newSnaps = snaps.concat([{ phase: 5.0, time: now, auto: true }]);
-  // Optimistically record the snapshot locally so the auto-delete TTL starts
-  // immediately and repeated sweeps (every 1s) don't re-issue this update while
-  // the realtime echo is in flight. The realtime UPDATE will replace e.snapshots
-  // with the authoritative server copy (identical) when it arrives.
-  e.snapshots = newSnaps;
-  // update (not upsert): if this entry was deleted elsewhere, it must stay
-  // deleted — upsert would re-insert the row and resurrect it.
-  sb.from('boss_entries').update({
-    snapshots: newSnaps,
-    note: 'auto-respawn (estimate ≥ 5.0)',
-    synced_at: now,
-  }).eq('id', e.id).then(function(r){
-    if (r.error) console.warn('[auto-snap] update failed', r.error);
-  });
+  else if (newState === 'spawn') { beep(SOUND_SPAWN); markAlerting(id); }
 }
 
 // ── Auto-delete respawned trackers (website-owned) ───────────
-// This is the cleanup job the retired Discord bot used to run. Delete a boss
-// RESPAWN_TTL_MS after its FIRST phase-5 snapshot, so the board stays clean.
+// Delete a boss RESPAWN_TTL_MS after its first reported phase-5 snapshot.
 // Driven from the tick loop over the full `entries` map (not just visible
 // cards) and once after loadAll(), so it clears the backlog when a tab opens.
 var RESPAWN_TTL_MS = 10 * 60 * 1000;   // 10 min after respawn → auto-delete
@@ -491,7 +458,7 @@ var RESPAWN_TTL_MS = 10 * 60 * 1000;   // 10 min after respawn → auto-delete
 function firstSpawnTs(snaps) {
   if (!snaps) return 0;
   for (var i = 0; i < snaps.length; i++) {
-    if ((snaps[i].phase || 0) >= 5) return snaps[i].time || 0;
+    if (!snaps[i].auto && (snaps[i].phase || 0) >= 5) return snaps[i].time || 0;
   }
   return 0;
 }
@@ -503,15 +470,7 @@ function sweepAutoDelete() {
     var e = entries[id];
     if (!e) return;
     var spawnAt = firstSpawnTs(e.snapshots);
-    if (!spawnAt) {
-      // No recorded phase-5 snapshot yet. If the boss has nonetheless crossed
-      // into 'spawn' by estimate, the snapshot side-effect in tick1/
-      // checkTransition can be missed entirely (card filtered out of view, or
-      // already-spawned at page load so the transition edge never fired). Record
-      // the crossing here so the TTL countdown can begin and the row is reaped.
-      if (getState(e, now).s === 'spawn') maybeAutoSnapRespawn(id);
-      return;                                   // no confirmed respawn → never auto-delete
-    }
+    if (!spawnAt) return;                        // no reported respawn → never auto-delete
     if (now - spawnAt <= RESPAWN_TTL_MS) return;
     autoDeleteEntry(e);
   });
@@ -647,9 +606,10 @@ function rowToEntry(row) {
 // state to p1/spawn regardless of how much time is left on the countdown.
 function getState(e, now) {
   if (e.snapshots && e.snapshots.length > 0) {
-    if (e.snapshots[e.snapshots.length - 1].phase >= 5) return { s: 'spawn', rem: null, pct: 1 };
-    var phS = estimatePhase(e, now);
-    if (phS !== null && phS >= 5) return { s: 'spawn', rem: null, pct: 1 };
+    var latest = e.snapshots[e.snapshots.length - 1];
+    // Only a player-reported phase 5 confirms that the boss has respawned.
+    // Ignore legacy auto snapshots that older versions created from estimates.
+    if (!latest.auto && latest.phase >= 5) return { s: 'spawn', rem: null, pct: 1 };
     return { s: 'p1', rem: null, pct: 1 };
   }
   if (!e.killTime || !e.durationMs) {
@@ -661,10 +621,6 @@ function getState(e, now) {
   var pct     = Math.min(1, elapsed / e.durationMs);
   if (e.missing)    return { s: 'miss', rem: rem, pct: pct };
   if (rem > 0)      return { s: 'wait', rem: rem, pct: pct };
-  // Countdown expired — auto-transition to RESPAWNED once estimated phase reaches 5,
-  // so the user no longer needs to click the respawn button manually.
-  var phK = estimatePhase(e, now);
-  if (phK !== null && phK >= 5) return { s: 'spawn', rem: rem, pct: 1 };
   if (rem > -20 * 60000)        return { s: 'p1',    rem: rem, pct: pct };
   return                                 { s: 'late', rem: rem, pct: pct };
 }
@@ -2017,7 +1973,7 @@ async function loadSamples() {
 async function persistLatestSample(level, snaps, sourceId) {
   if (snaps.length < 2) return;
   var a = snaps[snaps.length - 2], b = snaps[snaps.length - 1];
-  if (b.auto || a.auto) return;   // synthetic auto-respawn endpoint → fabricated time, not a real speed sample
+  if (b.auto || a.auto) return;   // ignore legacy synthetic endpoints
   var dt = b.time - a.time, dp = b.phase - a.phase;
   if (dt < 120000 || dp <= 0) return;
   var row = {
@@ -2048,13 +2004,12 @@ async function persistLatestSample(level, snaps, sourceId) {
 // Record a completed boss cycle as ground truth for offline spawn-time
 // backtesting (analyze.py replays the model from the early snapshots and
 // compares predicted vs actual spawn). Captures only PLAYER-observed spawns
-// with a genuine pre-spawn climb; auto-respawn (estimate ≥ 5) points are
-// excluded so the ground truth stays uncontaminated. Best-effort + tolerant:
+// with a genuine pre-spawn climb. Best-effort + tolerant:
 // until the spawn_cycles table exists the insert is silently skipped.
 async function recordSpawnCycle(level, ch, snaps, sourceId) {
   if (!snaps || snaps.length < 2) return;
   var spawn = snaps[snaps.length - 1];
-  if (!(spawn.phase >= 5)) return;
+  if (spawn.auto || !(spawn.phase >= 5)) return;
   var pre = snaps.slice(0, -1);
   if (!pre.some(function(s){ return s.phase >= 1 && s.phase < 5; })) return;  // need a climb
   if (pre.some(function(s){ return s.phase >= 5; })) return;                  // first spawn only
